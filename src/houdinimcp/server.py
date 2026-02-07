@@ -34,8 +34,11 @@ EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 1)
 EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 
+DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9876))
+
 class HoudiniMCPServer:
-    def __init__(self, host='localhost', port=9876):
+    def __init__(self, host='localhost', port=None):
+        port = port if port is not None else DEFAULT_PORT
         self.host = host
         self.port = port
         self.running = False
@@ -137,10 +140,21 @@ class HoudiniMCPServer:
     # Command Handling
     # -------------------------------------------------------------------------
     
+    # Commands that mutate the scene and should be wrapped in an undo group
+    MUTATING_COMMANDS = {
+        "create_node", "modify_node", "delete_node", "execute_code",
+        "set_material", "import_opus_url",
+    }
+
     def execute_command(self, command):
         """Entry point for executing a JSON command from the client."""
         try:
-            return self._execute_command_internal(command)
+            cmd_type = command.get("type", "")
+            if cmd_type in self.MUTATING_COMMANDS:
+                with hou.undos.group(f"MCP: {cmd_type}"):
+                    return self._execute_command_internal(command)
+            else:
+                return self._execute_command_internal(command)
         except Exception as e:
             print(f"Error executing command: {str(e)}")
             traceback.print_exc()
@@ -156,6 +170,7 @@ class HoudiniMCPServer:
 
         # Always-available handlers
         handlers = {
+            "ping": self.ping,
             "get_scene_info": self.get_scene_info,
             "create_node": self.create_node,
             "modify_node": self.modify_node,
@@ -188,6 +203,19 @@ class HoudiniMCPServer:
         result = handler(**params)
         print(f"Handler execution complete for {cmd_type}")
         return {"status": "success", "result": result}
+
+    # -------------------------------------------------------------------------
+    # Health Check
+    # -------------------------------------------------------------------------
+
+    def ping(self):
+        """Simple health check that returns server status."""
+        return {
+            "alive": True,
+            "host": self.host,
+            "port": self.port,
+            "has_client": self.client is not None,
+        }
 
     # -------------------------------------------------------------------------
     # Basic Info & Node Operations

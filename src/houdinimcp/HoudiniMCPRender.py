@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import os
+import tempfile
 import hou
 
 def find_displayed_geometry():
@@ -357,7 +358,7 @@ def setup_render_node(render_engine="opengl", karma_engine="cpu", render_path=No
     try:
         # Set default render path if not specified
         if not render_path:
-            render_path = "C:/temp/"
+            render_path = tempfile.gettempdir()
         
         # Ensure directory exists
         if not os.path.exists(render_path):

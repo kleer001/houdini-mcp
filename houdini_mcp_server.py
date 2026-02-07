@@ -14,12 +14,21 @@ import site
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Add the virtual environment's site-packages to Python's path
-venv_site_packages = os.path.join(script_dir, '.venv', 'Lib', 'site-packages')
-if os.path.exists(venv_site_packages):
-    sys.path.insert(0, venv_site_packages)
-    print(f"Added {venv_site_packages} to sys.path", file=sys.stderr)
-else:
-    print(f"Warning: Virtual environment site-packages not found at {venv_site_packages}", file=sys.stderr)
+# Check both Windows (Lib/site-packages) and Unix (lib/python*/site-packages) layouts
+import glob as _glob
+_venv_candidates = [
+    os.path.join(script_dir, '.venv', 'Lib', 'site-packages'),  # Windows
+    *_glob.glob(os.path.join(script_dir, '.venv', 'lib', 'python*', 'site-packages')),  # Unix
+]
+_venv_found = False
+for venv_site_packages in _venv_candidates:
+    if os.path.exists(venv_site_packages):
+        sys.path.insert(0, venv_site_packages)
+        print(f"Added {venv_site_packages} to sys.path", file=sys.stderr)
+        _venv_found = True
+        break
+if not _venv_found:
+    print(f"Warning: Virtual environment site-packages not found in {script_dir}/.venv/", file=sys.stderr)
 
 
 # For debugging
@@ -27,6 +36,7 @@ print("Python path:", sys.path, file=sys.stderr)
 import json
 import socket
 import logging
+import tempfile
 from dataclasses import dataclass
 from typing import Dict, Any, List
 from contextlib import asynccontextmanager
@@ -65,6 +75,7 @@ VARIATE_PATH = "/variate_opus_result"
 GET_JOB_RESULT_PATH = "/get_opus_job_result"
 
 TIMEOUT = 15 # seconds
+HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", 9876))
 
 if not RAPIDAPI_HOST_URL or not RAPIDAPI_HOST or not RAPIDAPI_KEY:
     print("Error: RAPIDAPI_HOST_URL, RAPIDAPI_HOST, and RAPIDAPI_KEY environment variables must be set in urls.env", file=sys.stderr)
@@ -411,6 +422,9 @@ class HoudiniConnection:
     host: str
     port: int
     sock: socket.socket = None
+    connected_since: float = None
+    last_command_at: float = None
+    command_count: int = 0
 
     def connect(self) -> bool:
         """Connect to the Houdini plugin (which is listening on self.host:self.port)."""
@@ -419,11 +433,13 @@ class HoudiniConnection:
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
+            self.connected_since = asyncio.get_event_loop().time()
             logger.info(f"Connected to Houdini at {self.host}:{self.port}")
             return True
         except Exception as e:
             logger.error(f"Failed to connect to Houdini: {str(e)}")
             self.sock = None
+            self.connected_since = None
             return False
 
     def disconnect(self):
@@ -434,6 +450,18 @@ class HoudiniConnection:
             except Exception as e:
                 logger.error(f"Error disconnecting from Houdini: {str(e)}")
             self.sock = None
+            self.connected_since = None
+
+    def get_status(self) -> dict:
+        """Return current connection status info."""
+        return {
+            "connected": self.sock is not None,
+            "host": self.host,
+            "port": self.port,
+            "connected_since": self.connected_since,
+            "last_command_at": self.last_command_at,
+            "command_count": self.command_count,
+        }
 
     def send_command(self, cmd_type: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -442,7 +470,7 @@ class HoudiniConnection:
         """
         if not self.connect():
             # Instead of raising, return an error dict consistent with API errors
-            error_msg = "Could not connect to Houdini on port 9876."
+            error_msg = f"Could not connect to Houdini on port {self.port}."
             logger.error(error_msg)
             # Return structure similar to API failures
             return {"status": "error", "message": error_msg, "origin": "mcp_server_connection"}
@@ -454,6 +482,8 @@ class HoudiniConnection:
         try:
             # Send the command
             self.sock.sendall(data_out)
+            self.last_command_at = asyncio.get_event_loop().time()
+            self.command_count += 1
             logger.info(f"Sent command to Houdini: {command}")
 
             # Read response. We'll accumulate chunks until we can parse a full JSON.
@@ -519,13 +549,13 @@ def get_houdini_connection() -> HoudiniConnection:
     global _houdini_connection
     if _houdini_connection is None:
         logger.info("Creating new HoudiniConnection.")
-        _houdini_connection = HoudiniConnection(host="localhost", port=9876)
+        _houdini_connection = HoudiniConnection(host="localhost", port=HOUDINI_PORT)
 
     # Always try to connect, returns True if already connected or successful now
     if not _houdini_connection.connect():
          # Connection failed, reset _houdini_connection to allow retry next time?
          _houdini_connection = None
-         raise ConnectionError("Could not connect to Houdini on localhost:9876. Is the plugin running?")
+         raise ConnectionError(f"Could not connect to Houdini on localhost:{HOUDINI_PORT}. Is the plugin running?")
          
     return _houdini_connection
 
@@ -561,6 +591,34 @@ mcp.lifespan = server_lifespan
 # -------------------------------------------------------------------
 # Original Houdini Tools (Get/Create Node, Execute Code)
 # -------------------------------------------------------------------
+@mcp.tool()
+def ping(ctx: Context) -> str:
+    """
+    Health check to verify Houdini is connected and responsive.
+    Returns server status info or an error if Houdini is unreachable.
+    """
+    try:
+        conn = get_houdini_connection()
+        response = conn.send_command("ping")
+        if response.get("status") == "error":
+            return f"Houdini unreachable: {response.get('message', 'Unknown error')}"
+        return json.dumps(response.get("result", {}), indent=2)
+    except ConnectionError as e:
+        return f"Houdini unreachable: {str(e)}"
+    except Exception as e:
+        return f"Ping failed: {str(e)}"
+
+@mcp.tool()
+def get_connection_status(ctx: Context) -> str:
+    """
+    Returns the current connection status to Houdini, including
+    whether connected, port, command count, and timing info.
+    """
+    global _houdini_connection
+    if _houdini_connection is None:
+        return json.dumps({"connected": False, "host": "localhost", "port": HOUDINI_PORT})
+    return json.dumps(_houdini_connection.get_status(), indent=2)
+
 @mcp.tool()
 def get_scene_info(ctx: Context) -> str:
     """
@@ -650,7 +708,7 @@ def execute_houdini_code(ctx: Context, code: str) -> str:
 def render_single_view(ctx: Context,
                        orthographic: bool = False,
                        rotation: List[float] = [0, 90, 0],
-                       render_path: str = "C:/temp/",
+                       render_path: str = None,
                        render_engine: str = "opengl",
                        karma_engine: str = "cpu") -> str:
     """
@@ -661,7 +719,7 @@ def render_single_view(ctx: Context,
         response = conn.send_command("render_single_view", {
             "orthographic": orthographic,
             "rotation": rotation,
-            "render_path": render_path,
+            "render_path": render_path or tempfile.gettempdir(),
             "render_engine": render_engine,
             "karma_engine": karma_engine,
         })
@@ -677,7 +735,7 @@ def render_single_view(ctx: Context,
 
 @mcp.tool()
 def render_quad_views(ctx: Context,
-                      render_path: str = "C:/temp/",
+                      render_path: str = None,
                       render_engine: str = "opengl",
                       karma_engine: str = "cpu") -> str:
     """
@@ -686,7 +744,7 @@ def render_quad_views(ctx: Context,
     try:
         conn = get_houdini_connection()
         response = conn.send_command("render_quad_view", {
-            "render_path": render_path,
+            "render_path": render_path or tempfile.gettempdir(),
             "render_engine": render_engine,
             "karma_engine": karma_engine,
         })
@@ -703,7 +761,7 @@ def render_quad_views(ctx: Context,
 @mcp.tool()
 def render_specific_camera(ctx: Context,
                            camera_path: str,
-                           render_path: str = "C:/temp/",
+                           render_path: str = None,
                            render_engine: str = "opengl",
                            karma_engine: str = "cpu") -> str:
     """
@@ -713,7 +771,7 @@ def render_specific_camera(ctx: Context,
         conn = get_houdini_connection()
         response = conn.send_command("render_specific_camera", {
             "camera_path": camera_path,
-            "render_path": render_path,
+            "render_path": render_path or tempfile.gettempdir(),
             "render_engine": render_engine,
             "karma_engine": karma_engine,
         })

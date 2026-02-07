@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pythonPanelDocument>
+  <interface name="claude_terminal" label="Claude Terminal" icon="MISC_python">
+    <script><![CDATA[
+from houdinimcp.claude_terminal import ClaudeTerminalWidget
+
+def onCreateInterface():
+    return ClaudeTerminalWidget()
+]]></script>
+    <help><![CDATA[
+Embedded Claude CLI terminal for interacting with Claude directly inside Houdini.
+
+Click "New Session" to start a Claude CLI session. Type messages in the input
+field and press Enter or click Send.
+
+The panel automatically sets HOUDINIMCP_PORT, HIP, and HOUDINI_VERSION
+environment variables for the Claude process.
+]]></help>
+  </interface>
+</pythonPanelDocument>

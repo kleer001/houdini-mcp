@@ -17,12 +17,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - For complex requests: Provide bulleted outline/plan before writing code
 - For simple requests: Execute directly
 - Override keyword: **"skip planning"** — Execute immediately without planning phase
+- Do not give time estimates unless explicitly asked
 
 ---
 
 ## Project Overview
 
 HoudiniMCP is a Model Context Protocol (MCP) bridge connecting SideFX Houdini to Claude AI. It enables Claude to programmatically control Houdini — creating/modifying nodes, executing code, rendering images, and importing 3D assets via the OPUS API.
+
+## Repo Structure
+
+```
+houdini_mcp_server.py      # MCP bridge entry point (uv run)
+pyproject.toml
+src/houdinimcp/
+    __init__.py             # Houdini plugin init (auto-start server)
+    server.py               # Houdini-side TCP server + command dispatcher
+    HoudiniMCPRender.py     # Rendering utilities (camera rig, OpenGL/Karma/Mantra)
+    claude_terminal.py      # Embedded Claude terminal panel for Houdini
+    ClaudeTerminal.pypanel  # Houdini panel XML definition
+scripts/
+    install.py              # Install plugin into Houdini prefs directory
+    launch.py               # Launch Houdini and/or MCP bridge
+tests/                      # pytest test suite
+docs/                       # Phased implementation plans and roadmaps
+```
 
 ## Running
 
@@ -32,19 +51,22 @@ uv run python houdini_mcp_server.py
 
 # Install dependencies
 uv add "mcp[cli]"
+
+# Run tests
+uv run pytest tests/ -v
 ```
 
-There is no test suite. Testing requires a running Houdini instance with the plugin loaded on port 9876.
+Tests in `tests/`. Some test pure helper functions; integration tests use a mock TCP server. No running Houdini instance required for the test suite.
 
 ## Architecture
 
 The system is a 3-layer bridge:
 
 ```
-Claude (MCP stdio) → houdini_mcp_server.py (MCP Bridge) → TCP:9876 → server.py (Houdini Plugin) → Houdini API
+Claude (MCP stdio) → houdini_mcp_server.py (MCP Bridge) → TCP:9876 → src/houdinimcp/server.py (Houdini Plugin) → Houdini API
 ```
 
-### Layer 1: Houdini Plugin (`__init__.py`, `server.py`)
+### Layer 1: Houdini Plugin (`src/houdinimcp/__init__.py`, `src/houdinimcp/server.py`)
 - Runs **inside** the Houdini process. Uses the `hou` module (Houdini Python API).
 - `HoudiniMCPServer` listens on `localhost:9876` with a non-blocking TCP socket polled via Qt's `QTimer` to avoid freezing Houdini's UI.
 - `execute_command()` is the central dispatcher — routes JSON commands (`create_node`, `modify_node`, `delete_node`, `get_node_info`, `execute_code`, `set_material`, `render_*`, `import_opus_url`) to handler methods.
@@ -58,15 +80,15 @@ Claude (MCP stdio) → houdini_mcp_server.py (MCP Bridge) → TCP:9876 → serve
 - OPUS API calls (RapidAPI) are handled **directly** here, not forwarded to Houdini — only the final model import goes through the TCP bridge.
 - Loads config from `urls.env` via `python-dotenv`.
 
-### Layer 3: Rendering (`HoudiniMCPRender.py`)
-- Utility module imported by `server.py` (runs inside Houdini).
+### Layer 3: Rendering (`src/houdinimcp/HoudiniMCPRender.py`)
+- Utility module imported by `src/houdinimcp/server.py` (runs inside Houdini).
 - Handles camera rig setup, geometry bounding box calculation, and rendering (OpenGL, Karma, Mantra).
 - `render_single_view()`, `render_quad_view()`, `render_specific_camera()` are the main entry points.
 - Rendered images are base64-encoded for JSON transport.
 
 ## Key Patterns
 
-- **Command dispatcher**: `server.py:execute_command()` routes by command type string to handler methods.
+- **Command dispatcher**: `src/houdinimcp/server.py:execute_command()` routes by command type string to handler methods.
 - **Global connection singleton**: `houdini_mcp_server.py` reuses one TCP connection across all MCP tool calls.
 - **OPUS batch job flow**: Create batch → poll status → download ZIP → extract → import into Houdini.
 - **Conditional imports**: `langchain` is optional (used for OPUS schema parsing); `HoudiniMCPRender` import is guarded.
@@ -82,6 +104,14 @@ Claude (MCP stdio) → houdini_mcp_server.py (MCP Bridge) → TCP:9876 → serve
 ## OPUS Integration
 
 Requires a RapidAPI key in `urls.env`. The OPUS API provides procedural furniture/environment 3D assets. See README.md section 5 for setup.
+
+## Phased Implementation Plans
+
+See `docs/` for phased plans:
+- **Phase 0**: Remove all OPUS/RapidAPI code
+- **Phase 1**: Expand to ~22 tools (wiring, scene management, parameters, animation, geometry)
+- **Phase 2**: Add PDG/USD/HDA/batch/export (~36 tools), refactor into `handlers/` and `tools/` subdirs
+- **Phase 3**: Offline Houdini docs search (BM25, zero external deps)
 
 ---
 
