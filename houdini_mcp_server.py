@@ -667,6 +667,31 @@ def render_flipbook(ctx: Context, frame_range: List[float] = None,
     return _send_tool_command("render_flipbook", params)
 
 
+# -------------------------------------------------------------------
+# Documentation Search (local-only, no Houdini connection)
+# -------------------------------------------------------------------
+@mcp.tool()
+def search_docs(ctx: Context, query: str, top_k: int = 5) -> str:
+    """Search Houdini documentation offline using BM25.
+    Returns ranked results with path, title, preview, and relevance score.
+    Does NOT require a Houdini connection."""
+    from houdini_rag import search_docs as _search
+    results = _search(query, top_k)
+    if isinstance(results, dict) and "error" in results:
+        return f"Error: {results['error']}"
+    return json.dumps(results, indent=2)
+
+@mcp.tool()
+def get_doc(ctx: Context, path: str) -> str:
+    """Get the full content of a Houdini documentation page by its relative path
+    (as returned by search_docs). Does NOT require a Houdini connection."""
+    from houdini_rag import get_doc_content
+    result = get_doc_content(path)
+    if "error" in result:
+        return f"Error: {result['error']}"
+    return json.dumps(result, indent=2)
+
+
 def main():
     """Run the MCP server on stdio."""
     mcp.run()

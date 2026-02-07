@@ -11,3 +11,7 @@ wheels/
 
 # Test artifacts
 .pytest_cache/
+
+# Houdini docs (fetched via scripts/fetch_houdini_docs.py)
+houdini_docs/
+houdini_docs_index.json

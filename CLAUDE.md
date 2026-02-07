@@ -29,18 +29,22 @@ HoudiniMCP is a Model Context Protocol (MCP) bridge connecting SideFX Houdini to
 
 ```
 houdini_mcp_server.py      # MCP bridge entry point (uv run)
+houdini_rag.py             # BM25 docs search engine (stdlib only)
 pyproject.toml
 src/houdinimcp/
     __init__.py             # Houdini plugin init (auto-start server)
     server.py               # Houdini-side TCP server + command dispatcher
+    handlers/               # Handler modules by category (scene, nodes, code, etc.)
     HoudiniMCPRender.py     # Rendering utilities (camera rig, OpenGL/Karma/Mantra)
     claude_terminal.py      # Embedded Claude terminal panel for Houdini
     ClaudeTerminal.pypanel  # Houdini panel XML definition
 scripts/
     install.py              # Install plugin into Houdini prefs directory
     launch.py               # Launch Houdini and/or MCP bridge
+    fetch_houdini_docs.py   # Download Houdini docs and build search index
 tests/                      # pytest test suite
 docs/                       # Phased implementation plans and roadmaps
+houdini_docs/              # (gitignored) Fetched Houdini documentation
 ```
 
 ## Running
