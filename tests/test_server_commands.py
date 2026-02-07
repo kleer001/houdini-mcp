@@ -43,6 +43,23 @@ _hou_mock.exprLanguage = types.SimpleNamespace(
     Python=1,
 )
 _hou_mock.Color = lambda r, g, b: (r, g, b)
+_hou_mock.nodeTypeCategories = lambda: {}
+_hou_mock.hda = types.SimpleNamespace(
+    installFile=lambda f: None,
+    definitionsInFile=lambda f: [],
+)
+_hou_mock.ui = types.SimpleNamespace(
+    paneTabOfType=lambda t: None,
+)
+_hou_mock.paneTabType = types.SimpleNamespace(
+    SceneViewer=0,
+)
+_hou_mock.LopSelectionRule = type("LopSelectionRule", (), {
+    "__init__": lambda self: None,
+    "setPathPattern": lambda self, p: None,
+    "setTypeName": lambda self, t: None,
+    "expandedPaths": lambda self, n: [],
+})
 sys.modules["hou"] = _hou_mock
 
 # Mock PySide2
@@ -106,6 +123,8 @@ class TestCommandDispatcher:
             "set_material", "connect_nodes", "disconnect_node_input",
             "set_node_flags", "save_scene", "load_scene", "set_expression",
             "set_frame", "layout_children", "set_node_color",
+            "pdg_cook", "pdg_dirty", "pdg_cancel",
+            "lop_import", "hda_install", "hda_create", "batch",
         }
         assert expected == HoudiniMCPServer.MUTATING_COMMANDS
 
@@ -168,3 +187,54 @@ class TestCommandDispatcher:
                              "shutil.rmtree", "subprocess", "os.system",
                              "os.popen", "__import__"}
         assert expected_patterns == set(HoudiniMCPServer.DANGEROUS_PATTERNS)
+
+    def test_batch_dispatches(self):
+        """Batch handler should execute multiple operations."""
+        result = self.server.execute_command({
+            "type": "batch",
+            "params": {"operations": [
+                {"type": "set_frame", "params": {"frame": 5}},
+                {"type": "set_frame", "params": {"frame": 10}},
+            ]},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["count"] == 2
+
+    def test_batch_unknown_op_fails(self):
+        """Batch with unknown operation type should fail."""
+        result = self.server.execute_command({
+            "type": "batch",
+            "params": {"operations": [
+                {"type": "nonexistent_op", "params": {}},
+            ]},
+        })
+        assert result["status"] == "error"
+        assert "Unknown operation" in result["message"]
+
+    def test_hda_list_dispatches(self):
+        """hda_list should return without error (empty with mocked hou)."""
+        result = self.server.execute_command({
+            "type": "hda_list",
+            "params": {},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["count"] == 0
+
+    def test_all_handlers_registered(self):
+        """Every expected command type should have a handler."""
+        handlers = self.server._get_handlers()
+        expected = [
+            "ping", "get_scene_info", "create_node", "modify_node",
+            "delete_node", "get_node_info", "execute_code", "set_material",
+            "connect_nodes", "disconnect_node_input", "set_node_flags",
+            "save_scene", "load_scene", "set_expression", "set_frame",
+            "get_geo_summary", "geo_export", "layout_children", "set_node_color",
+            "find_error_nodes", "pdg_cook", "pdg_status", "pdg_workitems",
+            "pdg_dirty", "pdg_cancel", "lop_stage_info", "lop_prim_get",
+            "lop_prim_search", "lop_layer_info", "lop_import",
+            "hda_list", "hda_get", "hda_install", "hda_create",
+            "batch", "render_single_view", "render_quad_view",
+            "render_specific_camera", "render_flipbook",
+        ]
+        for cmd in expected:
+            assert cmd in handlers, f"Handler not registered: {cmd}"

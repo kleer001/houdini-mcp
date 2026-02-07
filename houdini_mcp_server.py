@@ -533,6 +533,140 @@ def find_error_nodes(ctx: Context, root_path: str = "/obj") -> str:
     return _send_tool_command("find_error_nodes", {"root_path": root_path})
 
 
+# -------------------------------------------------------------------
+# PDG/TOPs
+# -------------------------------------------------------------------
+@mcp.tool()
+def pdg_cook(ctx: Context, path: str) -> str:
+    """Start cooking a TOP network (non-blocking)."""
+    return _send_tool_command("pdg_cook", {"path": path})
+
+@mcp.tool()
+def pdg_status(ctx: Context, path: str) -> str:
+    """Get cook status and work item counts for a TOP network."""
+    return _send_tool_command("pdg_status", {"path": path})
+
+@mcp.tool()
+def pdg_workitems(ctx: Context, path: str, state: str = None) -> str:
+    """List work items for a TOP node, optionally filtered by state."""
+    params = {"path": path}
+    if state is not None:
+        params["state"] = state
+    return _send_tool_command("pdg_workitems", params)
+
+@mcp.tool()
+def pdg_dirty(ctx: Context, path: str, dirty_all: bool = False) -> str:
+    """Dirty work items on a TOP node for re-cooking."""
+    return _send_tool_command("pdg_dirty", {"path": path, "dirty_all": dirty_all})
+
+@mcp.tool()
+def pdg_cancel(ctx: Context, path: str) -> str:
+    """Cancel a running PDG cook."""
+    return _send_tool_command("pdg_cancel", {"path": path})
+
+# -------------------------------------------------------------------
+# USD/Solaris (LOP)
+# -------------------------------------------------------------------
+@mcp.tool()
+def lop_stage_info(ctx: Context, path: str) -> str:
+    """Get USD stage info from a LOP node: prims, layers, time codes."""
+    return _send_tool_command("lop_stage_info", {"path": path})
+
+@mcp.tool()
+def lop_prim_get(ctx: Context, path: str, prim_path: str,
+                 include_attrs: bool = False) -> str:
+    """Get details of a specific USD prim."""
+    return _send_tool_command("lop_prim_get", {
+        "path": path, "prim_path": prim_path, "include_attrs": include_attrs,
+    })
+
+@mcp.tool()
+def lop_prim_search(ctx: Context, path: str, pattern: str,
+                    type_name: str = None) -> str:
+    """Search for USD prims matching a pattern."""
+    params = {"path": path, "pattern": pattern}
+    if type_name is not None:
+        params["type_name"] = type_name
+    return _send_tool_command("lop_prim_search", params)
+
+@mcp.tool()
+def lop_layer_info(ctx: Context, path: str) -> str:
+    """Get USD layer stack info from a LOP node."""
+    return _send_tool_command("lop_layer_info", {"path": path})
+
+@mcp.tool()
+def lop_import(ctx: Context, path: str, file: str,
+               method: str = "reference", prim_path: str = None) -> str:
+    """Import a USD file via reference or sublayer."""
+    params = {"path": path, "file": file, "method": method}
+    if prim_path is not None:
+        params["prim_path"] = prim_path
+    return _send_tool_command("lop_import", params)
+
+# -------------------------------------------------------------------
+# HDA Management
+# -------------------------------------------------------------------
+@mcp.tool()
+def hda_list(ctx: Context, category: str = None) -> str:
+    """List available HDA definitions, optionally filtered by category."""
+    params = {}
+    if category is not None:
+        params["category"] = category
+    return _send_tool_command("hda_list", params)
+
+@mcp.tool()
+def hda_get(ctx: Context, node_type: str, category: str = None) -> str:
+    """Get detailed info about an HDA definition."""
+    params = {"node_type": node_type}
+    if category is not None:
+        params["category"] = category
+    return _send_tool_command("hda_get", params)
+
+@mcp.tool()
+def hda_install(ctx: Context, file_path: str) -> str:
+    """Install an HDA file into the current Houdini session."""
+    return _send_tool_command("hda_install", {"file_path": file_path})
+
+@mcp.tool()
+def hda_create(ctx: Context, node_path: str, name: str,
+               label: str, file_path: str) -> str:
+    """Create an HDA from an existing node."""
+    return _send_tool_command("hda_create", {
+        "node_path": node_path, "name": name, "label": label, "file_path": file_path,
+    })
+
+# -------------------------------------------------------------------
+# Batch & Export
+# -------------------------------------------------------------------
+@mcp.tool()
+def batch(ctx: Context, operations: List[Dict[str, Any]] = []) -> str:
+    """Execute multiple operations atomically in a single undo group.
+    Each operation: {"type": "create_node", "params": {...}}."""
+    return _send_tool_command("batch", {"operations": operations})
+
+@mcp.tool()
+def geo_export(ctx: Context, node_path: str, format: str = "obj",
+               output: str = None) -> str:
+    """Export geometry to a file. Formats: obj, gltf, glb, usd, usda, ply, bgeo.sc."""
+    params = {"node_path": node_path, "format": format}
+    if output is not None:
+        params["output"] = output
+    return _send_tool_command("geo_export", params)
+
+@mcp.tool()
+def render_flipbook(ctx: Context, frame_range: List[float] = None,
+                    output: str = None, resolution: List[int] = None) -> str:
+    """Render a flipbook sequence from the viewport."""
+    params = {}
+    if frame_range is not None:
+        params["frame_range"] = frame_range
+    if output is not None:
+        params["output"] = output
+    if resolution is not None:
+        params["resolution"] = resolution
+    return _send_tool_command("render_flipbook", params)
+
+
 def main():
     """Run the MCP server on stdio."""
     mcp.run()

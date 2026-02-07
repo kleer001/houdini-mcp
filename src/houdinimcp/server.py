@@ -139,6 +139,8 @@ class HoudiniMCPServer:
         "set_material", "connect_nodes", "disconnect_node_input",
         "set_node_flags", "save_scene", "load_scene", "set_expression",
         "set_frame", "layout_children", "set_node_color",
+        "pdg_cook", "pdg_dirty", "pdg_cancel",
+        "lop_import", "hda_install", "hda_create", "batch",
     }
 
     DANGEROUS_PATTERNS = [
@@ -160,15 +162,8 @@ class HoudiniMCPServer:
             traceback.print_exc()
             return {"status": "error", "message": str(e)}
 
-    def _execute_command_internal(self, command):
-        """
-        Internal dispatcher that looks up 'cmd_type' from the JSON,
-        calls the relevant function, and returns a JSON-friendly dict.
-        """
-        cmd_type = command.get("type")
-        params = command.get("params", {})
-
-        # Always-available handlers
+    def _get_handlers(self):
+        """Return the command handler dispatch dict."""
         handlers = {
             "ping": self.ping,
             "get_scene_info": self.get_scene_info,
@@ -191,27 +186,54 @@ class HoudiniMCPServer:
             "set_frame": self.set_frame,
             # Geometry
             "get_geo_summary": self.get_geo_summary,
+            "geo_export": self.geo_export,
             # Layout & organization
             "layout_children": self.layout_children,
             "set_node_color": self.set_node_color,
             # Error detection
             "find_error_nodes": self.find_error_nodes,
+            # PDG/TOPs
+            "pdg_cook": self.pdg_cook,
+            "pdg_status": self.pdg_status,
+            "pdg_workitems": self.pdg_workitems,
+            "pdg_dirty": self.pdg_dirty,
+            "pdg_cancel": self.pdg_cancel,
+            # USD/Solaris
+            "lop_stage_info": self.lop_stage_info,
+            "lop_prim_get": self.lop_prim_get,
+            "lop_prim_search": self.lop_prim_search,
+            "lop_layer_info": self.lop_layer_info,
+            "lop_import": self.lop_import,
+            # HDA management
+            "hda_list": self.hda_list,
+            "hda_get": self.hda_get,
+            "hda_install": self.hda_install,
+            "hda_create": self.hda_create,
+            # Batch
+            "batch": self.batch,
             # Render handlers
             "render_single_view": self.handle_render_single_view,
             "render_quad_view": self.handle_render_quad_view,
             "render_specific_camera": self.handle_render_specific_camera,
+            "render_flipbook": self.render_flipbook,
         }
-        
-        # If user has toggled asset library usage
         if getattr(hou.session, "houdinimcp_use_assetlib", False):
-            asset_handlers = {
+            handlers.update({
                 "get_asset_categories": self.get_asset_categories,
                 "search_assets": self.search_assets,
                 "import_asset": self.import_asset,
-            }
-            handlers.update(asset_handlers)
+            })
+        return handlers
 
-        handler = handlers.get(cmd_type)
+    def _execute_command_internal(self, command):
+        """
+        Internal dispatcher that looks up 'cmd_type' from the JSON,
+        calls the relevant function, and returns a JSON-friendly dict.
+        """
+        cmd_type = command.get("type")
+        params = command.get("params", {})
+
+        handler = self._get_handlers().get(cmd_type)
         if not handler:
             return {"status": "error", "message": f"Unknown command type: {cmd_type}"}
         
@@ -662,6 +684,35 @@ class HoudiniMCPServer:
         return {"path": node.path(), "color": color}
 
     # -------------------------------------------------------------------------
+    # Geometry Export
+    # -------------------------------------------------------------------------
+
+    def geo_export(self, node_path, format="obj", output=None):
+        """Export geometry to a file. Formats: obj, gltf, glb, usd, usda, ply, bgeo.sc."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        geo = node.geometry()
+        if not geo:
+            raise ValueError(f"Node has no geometry: {node_path}")
+        if not output:
+            output = os.path.join(tempfile.gettempdir(), f"mcp_export.{format}")
+        geo.saveToFile(output)
+        bbox = geo.boundingBox()
+        return {
+            "exported": True,
+            "file": output,
+            "format": format,
+            "num_points": len(geo.points()),
+            "num_prims": len(geo.prims()),
+            "num_vertices": len(geo.vertices()),
+            "bounding_box": {
+                "min": list(bbox.minvec()),
+                "max": list(bbox.maxvec()),
+            },
+        }
+
+    # -------------------------------------------------------------------------
     # Error Detection
     # -------------------------------------------------------------------------
 
@@ -685,6 +736,281 @@ class HoudiniMCPServer:
                     "warnings": node.warnings(),
                 })
         return {"root": root_path, "error_count": len(error_nodes), "nodes": error_nodes}
+
+    # -------------------------------------------------------------------------
+    # PDG/TOPs
+    # -------------------------------------------------------------------------
+
+    def pdg_cook(self, path):
+        """Start cooking a TOP network (non-blocking)."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        node.executeGraph(False, False, False, False)
+        return {"cooking": True, "path": node.path()}
+
+    def pdg_status(self, path):
+        """Get cook status and work item counts for a TOP network."""
+        import pdg
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        pdg_node = node.getPDGNode()
+        if not pdg_node:
+            raise ValueError(f"No PDG node for: {path}")
+        counts = {"waiting": 0, "cooking": 0, "cooked": 0, "failed": 0}
+        for wi in pdg_node.workItems:
+            state = wi.state
+            if state == pdg.workItemState.CookedSuccess:
+                counts["cooked"] += 1
+            elif state == pdg.workItemState.Cooking:
+                counts["cooking"] += 1
+            elif state == pdg.workItemState.Waiting:
+                counts["waiting"] += 1
+            elif state == pdg.workItemState.CookedFail:
+                counts["failed"] += 1
+        counts["total"] = sum(counts.values())
+        return {"path": node.path(), **counts}
+
+    def pdg_workitems(self, path, state=None):
+        """List work items for a TOP node, optionally filtered by state."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        pdg_node = node.getPDGNode()
+        if not pdg_node:
+            raise ValueError(f"No PDG node for: {path}")
+        items = []
+        for wi in pdg_node.workItems:
+            wi_state = str(wi.state)
+            if state and state.lower() not in wi_state.lower():
+                continue
+            item = {
+                "id": wi.id,
+                "index": wi.index,
+                "state": wi_state,
+                "output_files": [f.path for f in wi.outputFiles],
+            }
+            items.append(item)
+        return {"path": node.path(), "count": len(items), "work_items": items}
+
+    def pdg_dirty(self, path, dirty_all=False):
+        """Dirty work items on a TOP node for re-cooking."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        pdg_node = node.getPDGNode()
+        if not pdg_node:
+            raise ValueError(f"No PDG node for: {path}")
+        if dirty_all:
+            pdg_node.dirtyAllTasks(True)
+        else:
+            pdg_node.dirty(True)
+        return {"dirtied": True, "path": node.path(), "all": dirty_all}
+
+    def pdg_cancel(self, path):
+        """Cancel a running PDG cook."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        context = node.getPDGGraphContext()
+        if not context:
+            raise ValueError(f"No PDG context for: {path}")
+        context.cancelCook()
+        return {"cancelled": True, "path": node.path()}
+
+    # -------------------------------------------------------------------------
+    # USD/Solaris (LOP)
+    # -------------------------------------------------------------------------
+
+    def lop_stage_info(self, path):
+        """Get USD stage info from a LOP node: prims, layers, time codes."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        stage = node.stage()
+        if not stage:
+            raise ValueError(f"No USD stage on: {path}")
+        root_prims = [str(p.GetPath()) for p in stage.GetPseudoRoot().GetChildren()]
+        default_prim = str(stage.GetDefaultPrim().GetPath()) if stage.HasDefaultPrim() else None
+        return {
+            "path": node.path(),
+            "prim_count": len(list(stage.Traverse())),
+            "root_prims": root_prims,
+            "default_prim": default_prim,
+            "layer_count": len(stage.GetLayerStack()),
+            "start_time": stage.GetStartTimeCode(),
+            "end_time": stage.GetEndTimeCode(),
+        }
+
+    def lop_prim_get(self, path, prim_path, include_attrs=False):
+        """Get details of a specific USD prim."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        stage = node.stage()
+        if not stage:
+            raise ValueError(f"No USD stage on: {path}")
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim:
+            raise ValueError(f"Prim not found: {prim_path}")
+        info = {
+            "prim_path": str(prim.GetPath()),
+            "type": str(prim.GetTypeName()),
+            "children": [str(c.GetPath()) for c in prim.GetChildren()],
+        }
+        if include_attrs:
+            attrs = {}
+            for attr in prim.GetAttributes():
+                val = attr.Get()
+                attrs[attr.GetName()] = str(val) if val is not None else None
+            info["attributes"] = attrs
+        return info
+
+    def lop_prim_search(self, path, pattern, type_name=None):
+        """Search for USD prims matching a pattern."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        rule = hou.LopSelectionRule()
+        rule.setPathPattern(pattern)
+        if type_name:
+            rule.setTypeName(type_name)
+        prims = rule.expandedPaths(node)
+        return {
+            "path": node.path(),
+            "pattern": pattern,
+            "matches": [str(p) for p in prims],
+            "count": len(prims),
+        }
+
+    def lop_layer_info(self, path):
+        """Get USD layer stack info from a LOP node."""
+        node = hou.node(path)
+        if not node:
+            raise ValueError(f"Node not found: {path}")
+        stage = node.stage()
+        if not stage:
+            raise ValueError(f"No USD stage on: {path}")
+        layers = []
+        for layer in stage.GetLayerStack():
+            layers.append({
+                "identifier": layer.identifier,
+                "path": layer.realPath,
+            })
+        return {"path": node.path(), "layers": layers, "count": len(layers)}
+
+    def lop_import(self, path, file, method="reference", prim_path=None):
+        """Import a USD file via reference or sublayer."""
+        parent = hou.node(path)
+        if not parent:
+            raise ValueError(f"Parent path not found: {path}")
+        if method == "reference":
+            node = parent.createNode("reference", "usd_import")
+            node.parm("filepath1").set(file)
+            if prim_path:
+                node.parm("primpath").set(prim_path)
+        elif method == "sublayer":
+            node = parent.createNode("sublayer", "usd_import")
+            node.parm("filepath1").set(file)
+        else:
+            raise ValueError(f"Unknown import method: {method}")
+        return {"imported": True, "path": node.path(), "file": file, "method": method}
+
+    # -------------------------------------------------------------------------
+    # HDA Management
+    # -------------------------------------------------------------------------
+
+    def hda_list(self, category=None):
+        """List available HDA definitions, optionally filtered by category."""
+        result = []
+        for cat_name, cat in hou.nodeTypeCategories().items():
+            if category and cat_name != category:
+                continue
+            for name, node_type in cat.nodeTypes().items():
+                defn = node_type.definition()
+                if defn:
+                    result.append({
+                        "name": name,
+                        "category": cat_name,
+                        "label": node_type.description(),
+                        "library": defn.libraryFilePath(),
+                    })
+            if len(result) >= 200:
+                break
+        return {"count": len(result), "definitions": result}
+
+    def hda_get(self, node_type, category=None):
+        """Get detailed info about an HDA definition."""
+        nt = None
+        if category:
+            cat = hou.nodeTypeCategories().get(category)
+            if not cat:
+                raise ValueError(f"Category not found: {category}")
+            nt = cat.nodeTypes().get(node_type)
+        else:
+            for cat in hou.nodeTypeCategories().values():
+                nt = cat.nodeTypes().get(node_type)
+                if nt:
+                    break
+        if not nt:
+            raise ValueError(f"Node type not found: {node_type}")
+        defn = nt.definition()
+        if not defn:
+            raise ValueError(f"No HDA definition for: {node_type}")
+        return {
+            "name": nt.name(),
+            "label": nt.description(),
+            "category": nt.category().name(),
+            "library": defn.libraryFilePath(),
+            "version": defn.version(),
+            "max_inputs": defn.maxNumInputs(),
+            "help": defn.comment() or "",
+            "sections": list(defn.sections().keys()),
+        }
+
+    def hda_install(self, file_path):
+        """Install an HDA file into the current Houdini session."""
+        hou.hda.installFile(file_path)
+        definitions = hou.hda.definitionsInFile(file_path)
+        installed = []
+        for defn in definitions:
+            installed.append({
+                "name": defn.nodeType().name(),
+                "category": defn.nodeTypeCategory().name(),
+                "label": defn.description(),
+            })
+        return {"installed": True, "file": file_path, "definitions": installed}
+
+    def hda_create(self, node_path, name, label, file_path):
+        """Create an HDA from an existing node."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        hda_node = node.createDigitalAsset(
+            name=name,
+            hda_file_name=file_path,
+            description=label,
+        )
+        return {"created": True, "path": hda_node.path(), "name": name, "file": file_path}
+
+    # -------------------------------------------------------------------------
+    # Batch Operations
+    # -------------------------------------------------------------------------
+
+    def batch(self, operations):
+        """Execute multiple operations atomically. Each op: {type, params}."""
+        handlers = self._get_handlers()
+        results = []
+        for op in operations:
+            cmd_type = op.get("type")
+            params = op.get("params", {})
+            handler = handlers.get(cmd_type)
+            if not handler:
+                raise ValueError(f"Unknown operation in batch: {cmd_type}")
+            result = handler(**params)
+            results.append({"type": cmd_type, "result": result})
+        return {"count": len(results), "results": results}
 
     # -------------------------------------------------------------------------
     # Render Command Handlers (using HoudiniMCPRender.py)
@@ -851,6 +1177,22 @@ class HoudiniMCPServer:
             print(error_message)
             traceback.print_exc()
             return {"status": "error", "message": error_message, "origin": "handle_render_specific_camera"}
+
+    def render_flipbook(self, frame_range=None, output=None, resolution=None):
+        """Render a flipbook sequence from the viewport."""
+        viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
+        if not viewer:
+            raise RuntimeError("No scene viewer found for flipbook")
+        settings = viewer.flipbookSettings().stash()
+        if frame_range and len(frame_range) == 2:
+            settings.frameRange((frame_range[0], frame_range[1]))
+        if not output:
+            output = os.path.join(tempfile.gettempdir(), "mcp_flipbook.$F4.jpg")
+        settings.output(output)
+        if resolution and len(resolution) == 2:
+            settings.resolution((resolution[0], resolution[1]))
+        viewer.flipbook(settings=settings)
+        return {"flipbook": True, "output": output}
 
     # -------------------------------------------------------------------------
     # Existing Placeholder asset library methods
