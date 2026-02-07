@@ -30,9 +30,19 @@ class _UndoGroup:
 
 _hou_mock.undos = types.SimpleNamespace(group=_UndoGroup)
 _hou_mock.node = lambda path: None
-_hou_mock.hipFile = types.SimpleNamespace(name=lambda: "untitled.hip")
+_hou_mock.hipFile = types.SimpleNamespace(
+    name=lambda: "untitled.hip",
+    save=lambda *a, **kw: None,
+    load=lambda *a, **kw: None,
+)
 _hou_mock.fps = lambda: 24.0
 _hou_mock.playbar = types.SimpleNamespace(frameRange=lambda: (1, 240))
+_hou_mock.setFrame = lambda f: None
+_hou_mock.exprLanguage = types.SimpleNamespace(
+    Hscript=0,
+    Python=1,
+)
+_hou_mock.Color = lambda r, g, b: (r, g, b)
 sys.modules["hou"] = _hou_mock
 
 # Mock PySide2
@@ -91,8 +101,12 @@ class TestCommandDispatcher:
 
     def test_mutating_commands_set(self):
         """Verify MUTATING_COMMANDS contains the expected commands."""
-        expected = {"create_node", "modify_node", "delete_node", "execute_code",
-                    "set_material"}
+        expected = {
+            "create_node", "modify_node", "delete_node", "execute_code",
+            "set_material", "connect_nodes", "disconnect_node_input",
+            "set_node_flags", "save_scene", "load_scene", "set_expression",
+            "set_frame", "layout_children", "set_node_color",
+        }
         assert expected == HoudiniMCPServer.MUTATING_COMMANDS
 
     def test_ping_handler_fields(self):
@@ -102,3 +116,55 @@ class TestCommandDispatcher:
         assert "port" in result
         assert result["alive"] is True
         assert result["port"] == 9876
+
+    def test_dangerous_code_blocked(self):
+        """execute_code should reject dangerous patterns by default."""
+        result = self.server.execute_command({
+            "type": "execute_code",
+            "params": {"code": "import os; os.remove('/tmp/foo')"},
+        })
+        assert result["status"] == "error"
+        assert "Dangerous pattern" in result["message"]
+
+    def test_dangerous_code_allowed(self):
+        """execute_code with allow_dangerous=True should proceed."""
+        result = self.server.execute_command({
+            "type": "execute_code",
+            "params": {"code": "x = 1 + 1", "allow_dangerous": True},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["executed"] is True
+
+    def test_safe_code_executes(self):
+        """Normal code without dangerous patterns should execute fine."""
+        result = self.server.execute_command({
+            "type": "execute_code",
+            "params": {"code": "x = 42"},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["executed"] is True
+
+    def test_set_frame_dispatches(self):
+        """set_frame should call through the dispatcher."""
+        result = self.server.execute_command({
+            "type": "set_frame",
+            "params": {"frame": 10},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["frame"] == 10
+
+    def test_save_scene_dispatches(self):
+        """save_scene should return saved status."""
+        result = self.server.execute_command({
+            "type": "save_scene",
+            "params": {},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["saved"] is True
+
+    def test_dangerous_patterns_list(self):
+        """Verify all expected dangerous patterns are in the list."""
+        expected_patterns = {"hou.exit", "os.remove", "os.unlink",
+                             "shutil.rmtree", "subprocess", "os.system",
+                             "os.popen", "__import__"}
+        assert expected_patterns == set(HoudiniMCPServer.DANGEROUS_PATTERNS)

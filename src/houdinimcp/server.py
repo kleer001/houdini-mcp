@@ -136,8 +136,15 @@ class HoudiniMCPServer:
     # Commands that mutate the scene and should be wrapped in an undo group
     MUTATING_COMMANDS = {
         "create_node", "modify_node", "delete_node", "execute_code",
-        "set_material",
+        "set_material", "connect_nodes", "disconnect_node_input",
+        "set_node_flags", "save_scene", "load_scene", "set_expression",
+        "set_frame", "layout_children", "set_node_color",
     }
+
+    DANGEROUS_PATTERNS = [
+        "hou.exit", "os.remove", "os.unlink", "shutil.rmtree",
+        "subprocess", "os.system", "os.popen", "__import__",
+    ]
 
     def execute_command(self, command):
         """Entry point for executing a JSON command from the client."""
@@ -172,6 +179,23 @@ class HoudiniMCPServer:
             "execute_code": self.execute_code,
             "set_material": self.set_material,
             "get_asset_lib_status": self.get_asset_lib_status,
+            # Wiring & connections
+            "connect_nodes": self.connect_nodes,
+            "disconnect_node_input": self.disconnect_node_input,
+            "set_node_flags": self.set_node_flags,
+            # Scene management
+            "save_scene": self.save_scene,
+            "load_scene": self.load_scene,
+            # Parameters & animation
+            "set_expression": self.set_expression,
+            "set_frame": self.set_frame,
+            # Geometry
+            "get_geo_summary": self.get_geo_summary,
+            # Layout & organization
+            "layout_children": self.layout_children,
+            "set_node_color": self.set_node_color,
+            # Error detection
+            "find_error_nodes": self.find_error_nodes,
             # Render handlers
             "render_single_view": self.handle_render_single_view,
             "render_quad_view": self.handle_render_quad_view,
@@ -381,8 +405,15 @@ class HoudiniMCPServer:
 
         return node_info
 
-    def execute_code(self, code):
+    def execute_code(self, code, allow_dangerous=False):
         """Executes arbitrary Python code within Houdini."""
+        if not allow_dangerous:
+            for pattern in self.DANGEROUS_PATTERNS:
+                if pattern in code:
+                    raise ValueError(
+                        f"Dangerous pattern detected: '{pattern}'. "
+                        "Pass allow_dangerous=True to override."
+                    )
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         try:
@@ -492,6 +523,168 @@ class HoudiniMCPServer:
         except Exception as e:
             traceback.print_exc()
             return {"status": "error", "message": str(e), "node": node_path}
+
+    # -------------------------------------------------------------------------
+    # Wiring & Connections
+    # -------------------------------------------------------------------------
+
+    def connect_nodes(self, src_path, dst_path, dst_input_index=0, src_output_index=0):
+        """Connect two nodes: src output -> dst input."""
+        src = hou.node(src_path)
+        dst = hou.node(dst_path)
+        if not src:
+            raise ValueError(f"Source node not found: {src_path}")
+        if not dst:
+            raise ValueError(f"Destination node not found: {dst_path}")
+        dst.setInput(dst_input_index, src, src_output_index)
+        return {
+            "connected": True,
+            "src": src.path(),
+            "dst": dst.path(),
+            "dst_input": dst_input_index,
+            "src_output": src_output_index,
+        }
+
+    def disconnect_node_input(self, node_path, input_index=0):
+        """Disconnect a specific input on a node."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        node.setInput(input_index, None)
+        return {"disconnected": True, "node": node.path(), "input_index": input_index}
+
+    def set_node_flags(self, node_path, display=None, render=None, bypass=None):
+        """Set display, render, and/or bypass flags on a node."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        changes = []
+        if display is not None:
+            node.setDisplayFlag(display)
+            changes.append(f"display={display}")
+        if render is not None:
+            node.setRenderFlag(render)
+            changes.append(f"render={render}")
+        if bypass is not None:
+            node.bypass(bypass)
+            changes.append(f"bypass={bypass}")
+        return {"path": node.path(), "changes": changes}
+
+    # -------------------------------------------------------------------------
+    # Scene Management
+    # -------------------------------------------------------------------------
+
+    def save_scene(self, file_path=None):
+        """Save the current scene, optionally to a new path."""
+        if file_path:
+            hou.hipFile.save(file_path)
+        else:
+            hou.hipFile.save()
+        return {"saved": True, "file": hou.hipFile.name()}
+
+    def load_scene(self, file_path):
+        """Load a .hip file."""
+        hou.hipFile.load(file_path)
+        return {"loaded": True, "file": hou.hipFile.name()}
+
+    # -------------------------------------------------------------------------
+    # Parameters & Animation
+    # -------------------------------------------------------------------------
+
+    def set_expression(self, node_path, parm_name, expression, language="hscript"):
+        """Set an expression on a node parameter."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        parm = node.parm(parm_name)
+        if not parm:
+            raise ValueError(f"Parameter not found: {parm_name} on {node_path}")
+        lang = hou.exprLanguage.Hscript if language == "hscript" else hou.exprLanguage.Python
+        parm.setExpression(expression, lang)
+        return {
+            "path": node.path(),
+            "parm": parm_name,
+            "expression": expression,
+            "language": language,
+        }
+
+    def set_frame(self, frame):
+        """Set the current frame in Houdini's playbar."""
+        hou.setFrame(frame)
+        return {"frame": frame}
+
+    # -------------------------------------------------------------------------
+    # Geometry
+    # -------------------------------------------------------------------------
+
+    def get_geo_summary(self, node_path):
+        """Return geometry stats: point/prim/vertex counts, bbox, attributes."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        geo = node.geometry()
+        if not geo:
+            raise ValueError(f"Node has no geometry: {node_path}")
+        bbox = geo.boundingBox()
+        return {
+            "num_points": len(geo.points()),
+            "num_prims": len(geo.prims()),
+            "num_vertices": len(geo.vertices()),
+            "bounding_box": {
+                "min": list(bbox.minvec()),
+                "max": list(bbox.maxvec()),
+            },
+            "point_attribs": [a.name() for a in geo.pointAttribs()],
+            "prim_attribs": [a.name() for a in geo.primAttribs()],
+            "detail_attribs": [a.name() for a in geo.globalAttribs()],
+        }
+
+    # -------------------------------------------------------------------------
+    # Layout & Organization
+    # -------------------------------------------------------------------------
+
+    def layout_children(self, node_path="/obj"):
+        """Auto-layout child nodes."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        node.layoutChildren()
+        return {"path": node.path(), "laid_out": True}
+
+    def set_node_color(self, node_path, color):
+        """Set a node's color as [r, g, b] (0-1 range)."""
+        node = hou.node(node_path)
+        if not node:
+            raise ValueError(f"Node not found: {node_path}")
+        if len(color) != 3:
+            raise ValueError(f"Color must be [r, g, b], got: {color}")
+        node.setColor(hou.Color(color[0], color[1], color[2]))
+        return {"path": node.path(), "color": color}
+
+    # -------------------------------------------------------------------------
+    # Error Detection
+    # -------------------------------------------------------------------------
+
+    def find_error_nodes(self, root_path="/obj"):
+        """Scan node hierarchy for cook errors and warnings."""
+        root = hou.node(root_path)
+        if not root:
+            raise ValueError(f"Root node not found: {root_path}")
+        error_nodes = []
+        for node in root.allSubChildren():
+            if node.errors():
+                error_nodes.append({
+                    "path": node.path(),
+                    "type": node.type().name(),
+                    "errors": node.errors(),
+                })
+            elif node.warnings():
+                error_nodes.append({
+                    "path": node.path(),
+                    "type": node.type().name(),
+                    "warnings": node.warnings(),
+                })
+        return {"root": root_path, "error_count": len(error_nodes), "nodes": error_nodes}
 
     # -------------------------------------------------------------------------
     # Render Command Handlers (using HoudiniMCPRender.py)
