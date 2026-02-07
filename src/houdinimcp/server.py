@@ -3,23 +3,16 @@ import json
 import threading
 import socket
 import time
-import requests
 import tempfile
 import traceback
 import os
-import shutil
 import sys
 from PySide2 import QtWidgets, QtCore
 import io
 from contextlib import redirect_stdout, redirect_stderr
 import base64 # Added for encoding
 
-# Imports for OPUS import
-import zipfile
-from urllib.parse import urlparse
-import uuid # For unique temp dirs and file processing
-
-# --- NEW: Import render functions --- 
+# --- Import render functions --- 
 # try:
 from .HoudiniMCPRender import *
 # HMCPLib = HoudiniMCPRender # Alias for easier use
@@ -143,7 +136,7 @@ class HoudiniMCPServer:
     # Commands that mutate the scene and should be wrapped in an undo group
     MUTATING_COMMANDS = {
         "create_node", "modify_node", "delete_node", "execute_code",
-        "set_material", "import_opus_url",
+        "set_material",
     }
 
     def execute_command(self, command):
@@ -179,8 +172,7 @@ class HoudiniMCPServer:
             "execute_code": self.execute_code,
             "set_material": self.set_material,
             "get_asset_lib_status": self.get_asset_lib_status,
-            "import_opus_url": self.handle_import_opus_url,
-            # Add new render handlers
+            # Render handlers
             "render_single_view": self.handle_render_single_view,
             "render_quad_view": self.handle_render_quad_view,
             "render_specific_camera": self.handle_render_specific_camera,
@@ -502,190 +494,7 @@ class HoudiniMCPServer:
             return {"status": "error", "message": str(e), "node": node_path}
 
     # -------------------------------------------------------------------------
-    # NEW OPUS Import Handler and Helpers
-    # -------------------------------------------------------------------------
-    
-    def _download_file(self, url, dest_folder):
-        """
-        Download from 'url' to local 'dest_folder', returning local filepath.
-        Helper for import_opus_url.
-        """
-        if not url:
-            raise ValueError("Download URL cannot be empty.")
-        if not os.path.exists(dest_folder):
-            os.makedirs(dest_folder, exist_ok=True)
-    
-        # Generate filename, ensure it ends with .zip if possible
-        try:
-            path_part = urlparse(url).path
-            filename = os.path.basename(path_part) if path_part else f"{uuid.uuid4()}.zip"
-            if not filename.lower().endswith('.zip'):
-                filename += ".zip"
-        except Exception:
-             filename = f"{uuid.uuid4()}.zip" # Fallback
-             
-        local_path = os.path.join(dest_folder, filename)
-        # Ensure forward slashes
-        local_path = local_path.replace('\\', '/')
-        print(f"  Downloading {url} => {local_path}")
-    
-        try:
-            # Use requests (already imported) for downloading
-            resp = requests.get(url, stream=True, timeout=60) # Add timeout
-            resp.raise_for_status()
-            with open(local_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            print(f"  Download complete: {local_path}")
-            return local_path
-        except requests.exceptions.RequestException as e:
-             print(f"  Download failed: {str(e)}")
-             # Clean up potentially incomplete file
-             if os.path.exists(local_path):
-                  try: os.remove(local_path)
-                  except: pass
-             raise ConnectionError(f"Failed to download file: {str(e)}") from e
-
-    def _unzip_file(self, zip_path, dest_folder):
-        """
-        Unzip 'zip_path' into 'dest_folder'. Return list of extracted file paths.
-        Helper for import_opus_url.
-        """
-        extracted_files = []
-        print(f"  Unzipping {zip_path} => {dest_folder}")
-        try:
-            with zipfile.ZipFile(zip_path, 'r') as z:
-                z.extractall(dest_folder)
-                # Ensure forward slashes in extracted paths
-                extracted_files = [os.path.join(dest_folder, p).replace('\\', '/') for p in z.namelist()]
-            print(f"  Unzip complete. Extracted {len(extracted_files)} files.")
-            return extracted_files
-        except zipfile.BadZipFile as e:
-             print(f"  Unzip failed: Bad zip file - {str(e)}")
-             raise ValueError(f"Downloaded file is not a valid zip file: {str(e)}") from e
-        except Exception as e:
-             print(f"  Unzip failed: {str(e)}")
-             raise IOError(f"Failed to unzip file: {str(e)}") from e
-
-    def handle_import_opus_url(self, url, node_name="opus_import"):
-        """
-        Downloads a ZIP file from URL, unzips it, finds a USD file,
-        and imports it into a new subnet in Houdini.
-        """
-        temp_dir = None
-        try:
-            # Create a unique temporary directory for download and extraction
-            temp_dir = tempfile.mkdtemp(prefix="houdini_opus_import_")
-            print(f"Created temporary directory: {temp_dir}")
-
-            # Download the zip file
-            zip_filepath = self._download_file(url, temp_dir)
-            if not zip_filepath or not os.path.exists(zip_filepath):
-                 raise FileNotFoundError("Download failed or file not found.")
-
-            # Unzip the file
-            extract_dir = os.path.join(temp_dir, "extracted")
-            extracted_files = self._unzip_file(zip_filepath, extract_dir)
-            if not extracted_files:
-                 raise FileNotFoundError("Unzip failed or zip file was empty.")
-
-            # Find the primary USD file (e.g., .usd, .usda, .usdc)
-            # Also check for GLTF/GLB as the zip name was gltf.zip
-            import_file = None
-            possible_usd_extensions = (".usd", ".usda", ".usdc")
-            possible_gltf_extensions = (".gltf", ".glb")
-            
-            # Prioritize USD files
-            for f in extracted_files:
-                if f.lower().endswith(possible_usd_extensions):
-                    import_file = f
-                    print(f"Found USD file: {import_file}")
-                    break
-            
-            # If no USD found, check for GLTF/GLB
-            if not import_file:
-                for f in extracted_files:
-                     if f.lower().endswith(possible_gltf_extensions):
-                        import_file = f
-                        print(f"Found GLTF/GLB file: {import_file}")
-                        break # Take the first match
-            
-            if not import_file:
-                 raise FileNotFoundError(f"No USD ({possible_usd_extensions}) or GLTF/GLB ({possible_gltf_extensions}) file found in the extracted contents.")
-
-            # --- Import into Houdini using gltf_hierarchy node directly in /obj ---
-            obj_context = hou.node("/obj")
-            if not obj_context:
-                 raise RuntimeError("Cannot find /obj context in Houdini.")
-            
-            # Create a gltf_hierarchy node directly in /obj
-            node_actual_name = node_name or "opus_import"
-            gltf_node = obj_context.createNode("gltf_hierarchy", node_actual_name)
-            if not gltf_node:
-                 raise RuntimeError(f"Failed to create gltf_hierarchy node '{node_actual_name}' in /obj.")
-            print(f"Created gltf_hierarchy node: {gltf_node.path()}")
-
-            # Set the filename parameter
-            print(f"Setting filename on {gltf_node.path()} to {import_file}")
-            try:
-                 # Parameter name might vary slightly, check common names
-                 param_name = "filename"
-                 if not gltf_node.parm(param_name):
-                      param_name = "file"
-                      if not gltf_node.parm(param_name):
-                           raise RuntimeError(f"Could not find filename parameter ('filename' or 'file') on {gltf_node.path()}")
-                           
-                 gltf_node.parm(param_name).set(import_file)
-                 print(f"Set parameter '{param_name}' successfully.")
-            except hou.Error as parm_e:
-                 print(f"Error setting filename parameter on gltf_hierarchy node: {parm_e}")
-                 raise RuntimeError(f"Failed to set filename on gltf_hierarchy node: {parm_e}") from parm_e
-
-            # Press the Build Scene button
-            build_scene_parm = gltf_node.parm("buildscene")
-            if build_scene_parm:
-                 print(f"Pressing 'Build Scene' button on {gltf_node.path()}")
-                 build_scene_parm.pressButton()
-            else:
-                 print(f"Warning: Could not find 'buildscene' parameter on {gltf_node.path()}. Scene might not be built automatically.")
-
-            # Layout nodes in /obj (optional, might be useful)
-            obj_context.layoutChildren()
-            
-            # Return the path to the gltf_hierarchy node
-            return {"status": "success", "imported_node_path": gltf_node.path(), "imported_file": import_file}
-
-        except Exception as e:
-            error_message = f"OPUS Import Failed: {str(e)}"
-            print(error_message)
-            traceback.print_exc() # Print full traceback to Houdini console
-            # Re-raise to be caught by execute_command and sent back as standard error
-            raise Exception(error_message) from e
-
-        finally:
-            # --- Cleanup --- 
-            # Only delete the downloaded zip file, keep the extracted contents
-            # as the gltf_hierarchy SOP needs to reference them.
-            if zip_filepath and os.path.exists(zip_filepath):
-                try:
-                    os.remove(zip_filepath)
-                    print(f"Cleaned up temporary zip file: {zip_filepath}")
-                except Exception as cleanup_zip_e:
-                    print(f"Warning: Failed to clean up temporary zip file {zip_filepath}: {cleanup_zip_e}")
-            
-            # Keep the temp_dir itself and the extracted folder for now
-            # If keeping the temp dir is problematic, we could copy the needed files elsewhere
-            # before deleting the temp_dir.
-            # if temp_dir and os.path.exists(temp_dir):
-            #     try:
-            #         shutil.rmtree(temp_dir)
-            #         print(f"Cleaned up temporary directory: {temp_dir}")
-            #     except Exception as cleanup_e:
-            #         print(f"Warning: Failed to clean up temporary directory {temp_dir}: {cleanup_e}")
-
-    # -------------------------------------------------------------------------
-    # NEW Render Command Handlers (using HoudiniMCPRender.py)
+    # Render Command Handlers (using HoudiniMCPRender.py)
     # -------------------------------------------------------------------------
     # def _check_render_lib(self):
     #     """Helper to check if the render library was imported."""

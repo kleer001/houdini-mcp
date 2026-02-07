@@ -1,7 +1,7 @@
 """Tests for the MCP bridge's HoudiniConnection class.
 
 We extract HoudiniConnection via AST to avoid triggering the full
-houdini_mcp_server.py initialization (FastMCP, env vars, OPUS imports).
+houdini_mcp_server.py initialization (FastMCP, env vars, etc.).
 """
 import ast
 import json

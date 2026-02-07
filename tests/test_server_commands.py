@@ -63,12 +63,6 @@ _numpy_mock.array = lambda *a, **kw: a[0] if a else []
 _numpy_mock.isinf = lambda x: types.SimpleNamespace(any=lambda: False)
 sys.modules["numpy"] = _numpy_mock
 
-# Mock requests (used by server.py for OPUS download)
-_requests_mock = types.ModuleType("requests")
-_requests_mock.get = lambda *a, **kw: None
-_requests_mock.exceptions = types.SimpleNamespace(RequestException=Exception)
-sys.modules["requests"] = _requests_mock
-
 # ---------- Now import the server ----------
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 from houdinimcp.server import HoudiniMCPServer
@@ -98,7 +92,7 @@ class TestCommandDispatcher:
     def test_mutating_commands_set(self):
         """Verify MUTATING_COMMANDS contains the expected commands."""
         expected = {"create_node", "modify_node", "delete_node", "execute_code",
-                    "set_material", "import_opus_url"}
+                    "set_material"}
         assert expected == HoudiniMCPServer.MUTATING_COMMANDS
 
     def test_ping_handler_fields(self):
