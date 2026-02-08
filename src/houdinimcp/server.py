@@ -25,6 +25,7 @@ from .handlers.rendering import (
     handle_render_single_view, handle_render_quad_view,
     handle_render_specific_camera, render_flipbook,
 )
+from .event_collector import EventCollector
 
 EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 2)
@@ -55,6 +56,7 @@ class HoudiniMCPServer:
         self.client = None
         self.buffer = b''
         self.timer = None
+        self.event_collector = EventCollector()
 
     def start(self):
         """Begin listening on the given port; sets up a QTimer to poll for data."""
@@ -68,6 +70,7 @@ class HoudiniMCPServer:
             self.timer = QtCore.QTimer()
             self.timer.timeout.connect(self._process_server)
             self.timer.start(100)
+            self.event_collector.start()
             print(f"HoudiniMCP server started on {self.host}:{self.port}")
         except Exception as e:
             print(f"Failed to start server: {str(e)}")
@@ -76,6 +79,7 @@ class HoudiniMCPServer:
     def stop(self):
         """Stop listening; close sockets and timers."""
         self.running = False
+        self.event_collector.stop()
         if self.timer:
             self.timer.stop()
             self.timer = None
@@ -185,6 +189,8 @@ class HoudiniMCPServer:
             "hda_install": hda_install,
             "hda_create": hda_create,
             "batch": self.batch,
+            "get_pending_events": self.get_pending_events,
+            "subscribe_events": self.subscribe_events,
             "render_single_view": handle_render_single_view,
             "render_quad_view": handle_render_quad_view,
             "render_specific_camera": handle_render_specific_camera,
@@ -238,6 +244,16 @@ class HoudiniMCPServer:
             result = handler(**params)
             results.append({"type": cmd_type, "result": result})
         return {"count": len(results), "results": results}
+
+    def get_pending_events(self, since=None):
+        """Return buffered events since last poll and clear the buffer."""
+        events = self.event_collector.get_pending(since=since)
+        return {"count": len(events), "events": events}
+
+    def subscribe_events(self, types=None):
+        """Configure which event types to collect. None = all."""
+        self.event_collector.subscribe(types)
+        return {"subscribed": types or "all"}
 
     def get_asset_categories(self):
         """Placeholder for an asset library feature."""

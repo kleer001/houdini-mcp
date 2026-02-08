@@ -668,6 +668,30 @@ def render_flipbook(ctx: Context, frame_range: List[float] = None,
 
 
 # -------------------------------------------------------------------
+# Event System
+# -------------------------------------------------------------------
+@mcp.tool()
+def get_houdini_events(ctx: Context, since: float = None) -> str:
+    """Get pending Houdini events (scene changes, node operations, frame changes).
+    Returns buffered events since last poll and clears the buffer.
+    Optionally pass a timestamp to only get events after that time."""
+    params = {}
+    if since is not None:
+        params["since"] = since
+    return _send_tool_command("get_pending_events", params)
+
+@mcp.tool()
+def subscribe_houdini_events(ctx: Context, types: List[str] = None) -> str:
+    """Configure which Houdini event types to collect.
+    Types: scene_loaded, scene_saved, scene_cleared, node_created, node_deleted, frame_changed.
+    Pass None/empty for all events."""
+    params = {}
+    if types is not None:
+        params["types"] = types
+    return _send_tool_command("subscribe_events", params)
+
+
+# -------------------------------------------------------------------
 # Documentation Search (local-only, no Houdini connection)
 # -------------------------------------------------------------------
 @mcp.tool()

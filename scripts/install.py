@@ -27,7 +27,9 @@ PLUGIN_FILES = [
     "src/houdinimcp/server.py",
     "src/houdinimcp/HoudiniMCPRender.py",
     "src/houdinimcp/claude_terminal.py",
+    "src/houdinimcp/event_collector.py",
 ]
+HANDLER_DIR = "src/houdinimcp/handlers"
 PANEL_FILES = [
     "src/houdinimcp/ClaudeTerminal.pypanel",
 ]
@@ -99,15 +101,18 @@ def install(prefs_dir, source_dir, dry_run=False):
             shutil.copy2(src, dst)
             print(f"  Copied {os.path.basename(filepath)}")
 
-    # Also copy urls.env if it exists and has a key configured
-    urls_env_src = os.path.join(source_dir, "urls.env")
-    urls_env_dst = os.path.join(plugin_dest, "urls.env")
-    if os.path.isfile(urls_env_src):
+    # Copy handlers/ directory
+    handlers_src = os.path.join(source_dir, HANDLER_DIR)
+    handlers_dest = os.path.join(plugin_dest, "handlers")
+    if os.path.isdir(handlers_src):
         if dry_run:
-            print(f"  COPY {urls_env_src} -> {urls_env_dst}")
+            print(f"  COPY {handlers_src}/ -> {handlers_dest}/")
         else:
-            shutil.copy2(urls_env_src, urls_env_dst)
-            print(f"  Copied urls.env")
+            if os.path.exists(handlers_dest):
+                shutil.rmtree(handlers_dest)
+            shutil.copytree(handlers_src, handlers_dest)
+            handler_count = sum(1 for f in os.listdir(handlers_dest) if f.endswith('.py'))
+            print(f"  Copied handlers/ ({handler_count} modules)")
 
     # Copy .pypanel files to Houdini's python_panels directory
     panels_dest = os.path.join(prefs_dir, "python_panels")

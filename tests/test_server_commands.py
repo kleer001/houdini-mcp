@@ -36,7 +36,37 @@ _hou_mock.hipFile = types.SimpleNamespace(
     load=lambda *a, **kw: None,
 )
 _hou_mock.fps = lambda: 24.0
-_hou_mock.playbar = types.SimpleNamespace(frameRange=lambda: (1, 240))
+_playbar_callbacks = []
+_hou_mock.playbar = types.SimpleNamespace(
+    frameRange=lambda: (1, 240),
+    addEventCallback=lambda cb: _playbar_callbacks.append(cb),
+    removeEventCallback=lambda cb: _playbar_callbacks.remove(cb) if cb in _playbar_callbacks else None,
+)
+_hou_mock.playbarEvent = types.SimpleNamespace(FrameChanged="FrameChanged")
+_hou_mock.hipFile.addEventCallback = lambda cb: None
+_hou_mock.hipFile.removeEventCallback = lambda cb: None
+_hou_mock.hipFile.path = lambda: "/tmp/test.hip"
+
+# Node event types for EventCollector
+_hou_mock.nodeEventType = types.SimpleNamespace(
+    ChildCreated="ChildCreated",
+    ChildDeleted="ChildDeleted",
+)
+_hou_mock.hipFileEventType = types.SimpleNamespace(
+    AfterLoad="AfterLoad",
+    AfterSave="AfterSave",
+    AfterClear="AfterClear",
+)
+
+# Make hou.node("/obj") return a mock with addEventCallback
+_obj_node = types.SimpleNamespace(
+    path=lambda: "/obj",
+    addEventCallback=lambda event_types, cb: None,
+    removeEventCallback=lambda event_types, cb: None,
+    children=lambda: [],
+)
+_orig_hou_node = _hou_mock.node
+_hou_mock.node = lambda path: _obj_node if path == "/obj" else None
 _hou_mock.setFrame = lambda f: None
 _hou_mock.exprLanguage = types.SimpleNamespace(
     Hscript=0,
@@ -105,6 +135,8 @@ class TestCommandDispatcher:
         self.server.client = None
         self.server.buffer = b""
         self.server.timer = None
+        from houdinimcp.event_collector import EventCollector
+        self.server.event_collector = EventCollector()
 
     def test_ping_returns_alive(self):
         result = self.server.execute_command({"type": "ping"})
@@ -233,8 +265,37 @@ class TestCommandDispatcher:
             "pdg_dirty", "pdg_cancel", "lop_stage_info", "lop_prim_get",
             "lop_prim_search", "lop_layer_info", "lop_import",
             "hda_list", "hda_get", "hda_install", "hda_create",
-            "batch", "render_single_view", "render_quad_view",
+            "batch", "get_pending_events", "subscribe_events",
+            "render_single_view", "render_quad_view",
             "render_specific_camera", "render_flipbook",
         ]
         for cmd in expected:
             assert cmd in handlers, f"Handler not registered: {cmd}"
+
+    def test_get_pending_events_dispatches(self):
+        """get_pending_events should return empty events list."""
+        result = self.server.execute_command({
+            "type": "get_pending_events",
+            "params": {},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["count"] == 0
+        assert result["result"]["events"] == []
+
+    def test_subscribe_events_dispatches(self):
+        """subscribe_events should accept a type filter."""
+        result = self.server.execute_command({
+            "type": "subscribe_events",
+            "params": {"types": ["scene_saved", "node_created"]},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["subscribed"] == ["scene_saved", "node_created"]
+
+    def test_subscribe_events_all(self):
+        """subscribe_events with no types = subscribe to all."""
+        result = self.server.execute_command({
+            "type": "subscribe_events",
+            "params": {},
+        })
+        assert result["status"] == "success"
+        assert result["result"]["subscribed"] == "all"
