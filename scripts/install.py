@@ -33,6 +33,9 @@ HANDLER_DIR = "src/houdinimcp/handlers"
 PANEL_FILES = [
     "src/houdinimcp/ClaudeTerminal.pypanel",
 ]
+SHELF_FILES = [
+    "src/houdinimcp/houdinimcp.shelf",
+]
 PACKAGE_NAME = "houdinimcp"
 
 
@@ -129,6 +132,22 @@ def install(prefs_dir, source_dir, dry_run=False):
         else:
             shutil.copy2(src, dst)
             print(f"  Copied {os.path.basename(filepath)} -> python_panels/")
+
+    # Copy .shelf files to Houdini's toolbar directory
+    toolbar_dest = os.path.join(prefs_dir, "toolbar")
+    if not dry_run:
+        os.makedirs(toolbar_dest, exist_ok=True)
+    for filepath in SHELF_FILES:
+        src = os.path.join(source_dir, filepath)
+        dst = os.path.join(toolbar_dest, os.path.basename(filepath))
+        if not os.path.isfile(src):
+            print(f"  SKIP {filepath} (not found in source)")
+            continue
+        if dry_run:
+            print(f"  COPY {src} -> {dst}")
+        else:
+            shutil.copy2(src, dst)
+            print(f"  Copied {os.path.basename(filepath)} -> toolbar/")
 
     # Create packages JSON
     # Use forward slashes for cross-platform Houdini compatibility

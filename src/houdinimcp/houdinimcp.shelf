@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <toolshelf name="houdinimcp" label="HoudiniMCP">
+    <memberTool name="houdinimcp_terminal"/>
+    <memberTool name="houdinimcp_toggle_server"/>
+  </toolshelf>
+
+  <tool name="houdinimcp_terminal" label="Claude Terminal" icon="hicon:/SVGIcons.index?IM_NewViewport.svg">
+    <helpText><![CDATA[Open the Claude Terminal panel in a floating window.]]></helpText>
+    <script scriptType="python"><![CDATA[
+import hou
+
+desktop = hou.ui.curDesktop()
+panel = desktop.createFloatingPanel(hou.paneTabType.PythonPanel)
+panel.setActiveInterface(hou.pypanel.interfaceByName("claude_terminal"))
+]]></script>
+  </tool>
+
+  <tool name="houdinimcp_toggle_server" label="Toggle MCP Server" icon="hicon:/SVGIcons.index?BUTTONS_connected.svg">
+    <helpText><![CDATA[Start or stop the HoudiniMCP TCP server (localhost:9876).]]></helpText>
+    <script scriptType="python"><![CDATA[
+import hou
+import houdinimcp
+
+if hasattr(hou.session, "houdinimcp_server") and hou.session.houdinimcp_server:
+    houdinimcp.stop_server()
+    hou.ui.displayMessage("HoudiniMCP server stopped.")
+else:
+    houdinimcp.start_server()
+    hou.ui.displayMessage("HoudiniMCP server started on localhost:9876.")
+]]></script>
+  </tool>
+</shelfDocument>

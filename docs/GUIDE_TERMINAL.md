@@ -6,8 +6,10 @@ editing, git operations — without leaving the Houdini UI.
 
 ## Opening the Panel
 
-1. In Houdini: **Window > Python Panels > Claude Terminal**
-2. The panel appears as a dockable tab — drag it to any pane layout position
+- Click **Claude Terminal** on the **HoudiniMCP** shelf toolbar (one click)
+- Or: **Window > Python Panels > Claude Terminal**
+
+The panel appears as a floating window. Drag it into any pane layout to dock it.
 
 ## Features
 

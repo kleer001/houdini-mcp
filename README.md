@@ -48,7 +48,26 @@ docs/                          # User guides and implementation plans
 
 ## Quick Start
 
-### 1. Install the Houdini Plugin
+### One-Liner Install
+
+**Linux / macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/kleer001/houdini-mcp/main/bootstrap.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/kleer001/houdini-mcp/main/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
+```
+
+The bootstrap script handles everything: clones the repo, installs [uv](https://docs.astral.sh/uv/) (to `~/.local/bin`), creates a venv, installs deps, sets up the Houdini plugin, downloads offline docs (~100 MB), and prints the Claude Desktop config snippet. Re-run from inside the repo at any time — it's idempotent.
+
+**Prerequisites:** git and Python 3.12+ must be installed. Houdini is optional at setup time.
+
+<details>
+<summary><strong>Manual setup (step by step)</strong></summary>
+
+#### 1. Install the Houdini Plugin
 
 ```bash
 # Auto-detect Houdini version and install
@@ -63,18 +82,18 @@ python scripts/install.py --dry-run
 
 This copies plugin files to your Houdini preferences directory and creates a packages JSON for auto-loading.
 
-### 2. Install MCP Dependencies
+#### 2. Install MCP Dependencies
 
 ```bash
 # Using uv (recommended)
 cd /path/to/houdini-mcp
-uv add "mcp[cli]"
+uv sync
 
 # Or using pip
 pip install "mcp[cli]"
 ```
 
-### 3. Configure Claude Desktop
+#### 3. Configure Claude Desktop
 
 Go to **File > Settings > Developer > Edit Config** and add:
 
@@ -84,23 +103,27 @@ Go to **File > Settings > Developer > Edit Config** and add:
     "houdini": {
       "command": "uv",
       "args": [
+        "--directory",
+        "/path/to/houdini-mcp",
         "run",
         "python",
-        "/path/to/houdini-mcp/houdini_mcp_server.py"
+        "houdini_mcp_server.py"
       ]
     }
   }
 }
 ```
 
-### 4. (Optional) Set Up Documentation Search
+#### 4. Set Up Documentation Search
 
 ```bash
-# Downloads Houdini docs and builds the BM25 index
+# Downloads Houdini docs and builds the BM25 index (~100 MB)
 python scripts/fetch_houdini_docs.py
 ```
 
 This enables the `search_docs` and `get_doc` tools — they work offline without a Houdini connection.
+
+</details>
 
 ---
 
@@ -216,21 +239,16 @@ The plugin includes a dockable Python Panel that runs Claude Code inside Houdini
 
 ---
 
-## Shelf Tool (Optional)
+## Shelf Tools
 
-Create a shelf tool to toggle the MCP server:
+The installer adds a **HoudiniMCP** shelf to Houdini's toolbar with two buttons:
 
-```python
-import hou
-import houdinimcp
+| Button | Icon | Action |
+|--------|------|--------|
+| **Claude Terminal** | IM_NewViewport | Opens the Claude Terminal panel in a floating window |
+| **Toggle MCP Server** | BUTTONS_connected | Starts or stops the MCP TCP server on localhost:9876 |
 
-if hasattr(hou.session, "houdinimcp_server") and hou.session.houdinimcp_server:
-    houdinimcp.stop_server()
-    hou.ui.displayMessage("Houdini MCP Server stopped")
-else:
-    houdinimcp.start_server()
-    hou.ui.displayMessage("Houdini MCP Server started on localhost:9876")
-```
+The shelf is installed automatically by `scripts/install.py` (or the bootstrap script).
 
 ---
 

@@ -47,6 +47,7 @@ src/houdinimcp/
     HoudiniMCPRender.py        # Rendering utilities (camera rig, bbox, OpenGL/Karma/Mantra)
     claude_terminal.py         # Embedded Claude terminal panel (tabbed, themed)
     ClaudeTerminal.pypanel     # Houdini panel XML definition
+    houdinimcp.shelf           # Shelf toolbar (Claude Terminal + Toggle Server buttons)
 scripts/
     install.py                 # Install plugin + handlers + panel into Houdini prefs
     launch.py                  # Launch Houdini and/or MCP bridge

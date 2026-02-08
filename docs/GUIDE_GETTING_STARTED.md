@@ -28,6 +28,7 @@ location. Use `--dry-run` to preview what it will do.
 - Plugin Python package to `scripts/python/houdinimcp/` in your Houdini prefs
 - Handler modules (scene, nodes, geometry, rendering, etc.)
 - Claude Terminal panel (`.pypanel`) to `python_panels/`
+- HoudiniMCP shelf (`.shelf`) to `toolbar/` — adds Claude Terminal and Toggle Server buttons
 - A packages JSON for auto-loading at Houdini startup
 
 ## Step 3: Install MCP Dependencies
