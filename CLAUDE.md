@@ -23,28 +23,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HoudiniMCP is a Model Context Protocol (MCP) bridge connecting SideFX Houdini to Claude AI. It enables Claude to programmatically control Houdini — creating/modifying nodes, executing code, and rendering images.
+HoudiniMCP is a Model Context Protocol (MCP) bridge connecting SideFX Houdini to Claude AI. It provides 41+ MCP tools for programmatic Houdini control — node operations, rendering, geometry, PDG/TOPs, USD/Solaris, HDA management, scene management, offline docs search, and a bidirectional event system.
 
 ## Repo Structure
 
 ```
-houdini_mcp_server.py      # MCP bridge entry point (uv run)
-houdini_rag.py             # BM25 docs search engine (stdlib only)
+houdini_mcp_server.py          # MCP bridge entry point (uv run), 41+ @mcp.tool() wrappers
+houdini_rag.py                 # BM25 docs search engine (stdlib only, zero deps)
 pyproject.toml
 src/houdinimcp/
-    __init__.py             # Houdini plugin init (auto-start server)
-    server.py               # Houdini-side TCP server + command dispatcher
-    handlers/               # Handler modules by category (scene, nodes, code, etc.)
-    HoudiniMCPRender.py     # Rendering utilities (camera rig, OpenGL/Karma/Mantra)
-    claude_terminal.py      # Embedded Claude terminal panel for Houdini
-    ClaudeTerminal.pypanel  # Houdini panel XML definition
+    __init__.py                # Houdini plugin init (auto-start server)
+    server.py                  # Houdini-side TCP server + command dispatcher (~270 lines)
+    handlers/                  # Handler modules by category:
+        scene.py               #   get_scene_info, save_scene, load_scene, set_frame
+        nodes.py               #   create/modify/delete/connect/flags/layout/color/errors
+        code.py                #   execute_code + DANGEROUS_PATTERNS guard
+        geometry.py            #   get_geo_summary, geo_export
+        pdg.py                 #   pdg_cook/status/workitems/dirty/cancel
+        lop.py                 #   lop_stage_info/prim_get/prim_search/layer_info/import
+        hda.py                 #   hda_list/get/install/create
+        rendering.py           #   render_single_view/quad_view/specific_camera/flipbook
+    event_collector.py         # EventCollector: Houdini callbacks → buffered events
+    HoudiniMCPRender.py        # Rendering utilities (camera rig, bbox, OpenGL/Karma/Mantra)
+    claude_terminal.py         # Embedded Claude terminal panel (tabbed, themed)
+    ClaudeTerminal.pypanel     # Houdini panel XML definition
 scripts/
-    install.py              # Install plugin into Houdini prefs directory
-    launch.py               # Launch Houdini and/or MCP bridge
-    fetch_houdini_docs.py   # Download Houdini docs and build search index
-tests/                      # pytest test suite
-docs/                       # Phased implementation plans and roadmaps
-houdini_docs/              # (gitignored) Fetched Houdini documentation
+    install.py                 # Install plugin + handlers + panel into Houdini prefs
+    launch.py                  # Launch Houdini and/or MCP bridge
+    fetch_houdini_docs.py      # Download Houdini docs corpus and build BM25 index
+tests/                         # pytest test suite (69 tests)
+docs/                          # User guides (getting started, tools, terminal, events)
+houdini_docs/                  # (gitignored) Fetched Houdini documentation
+houdini_docs_index.json        # (gitignored) BM25 index built from docs
 ```
 
 ## Running
@@ -56,58 +66,69 @@ uv run python houdini_mcp_server.py
 # Install dependencies
 uv add "mcp[cli]"
 
-# Run tests
-uv run pytest tests/ -v
-```
+# Run tests (no Houdini instance required)
+pytest tests/ -v
 
-Tests in `tests/`. Some test pure helper functions; integration tests use a mock TCP server. No running Houdini instance required for the test suite.
+# Fetch Houdini docs for offline search
+python scripts/fetch_houdini_docs.py
+
+# Install plugin into Houdini
+python scripts/install.py
+```
 
 ## Architecture
 
-The system is a 3-layer bridge:
-
 ```
-Claude (MCP stdio) → houdini_mcp_server.py (MCP Bridge) → TCP:9876 → src/houdinimcp/server.py (Houdini Plugin) → Houdini API
+Claude (MCP stdio) → houdini_mcp_server.py (Bridge) → TCP:9876 → server.py (Plugin) → hou API
+                   ↘ houdini_rag.py (docs search, local-only)
 ```
 
-### Layer 1: Houdini Plugin (`src/houdinimcp/__init__.py`, `src/houdinimcp/server.py`)
+### Layer 1: Houdini Plugin (`src/houdinimcp/`)
 - Runs **inside** the Houdini process. Uses the `hou` module (Houdini Python API).
-- `HoudiniMCPServer` listens on `localhost:9876` with a non-blocking TCP socket polled via Qt's `QTimer` to avoid freezing Houdini's UI.
-- `execute_command()` is the central dispatcher — routes JSON commands (`create_node`, `modify_node`, `delete_node`, `get_node_info`, `execute_code`, `set_material`, `render_*`) to handler methods.
-- Responses are JSON: `{"status": "success/error", "result": {...}}`.
-- Accumulates partial socket data in a buffer until a complete JSON object is received.
+- `HoudiniMCPServer` in `server.py` listens on `localhost:9876` with a non-blocking TCP socket polled via Qt's `QTimer`.
+- `execute_command()` dispatches JSON commands to handler functions in `handlers/`.
+- Mutating commands are wrapped in `hou.undos.group()` for undo support.
+- `EventCollector` registers Houdini callbacks (hipFile, node, playbar) and buffers events with deduplication.
+- `claude_terminal.py` provides a dockable PySide2 panel with tabbed Claude CLI sessions.
 
 ### Layer 2: MCP Bridge (`houdini_mcp_server.py`)
 - Runs in a **separate** Python process (via `uv run`).
-- `HoudiniConnection` class manages a persistent TCP connection to Houdini (global singleton via `get_houdini_connection()`).
-- MCP tools are decorated with `@mcp.tool()` (using `fastmcp`).
+- `HoudiniConnection` dataclass manages a persistent TCP connection (global singleton).
+- `_send_tool_command()` helper reduces each MCP tool to ~3 lines.
+- `search_docs` and `get_doc` tools run locally via `houdini_rag.py` — no Houdini connection needed.
 
 ### Layer 3: Rendering (`src/houdinimcp/HoudiniMCPRender.py`)
-- Utility module imported by `src/houdinimcp/server.py` (runs inside Houdini).
-- Handles camera rig setup, geometry bounding box calculation, and rendering (OpenGL, Karma, Mantra).
-- `render_single_view()`, `render_quad_view()`, `render_specific_camera()` are the main entry points.
+- Utility module imported by `handlers/rendering.py` (runs inside Houdini).
+- Handles camera rig setup, geometry bounding box calculation, and rendering.
 - Rendered images are base64-encoded for JSON transport.
 
 ## Key Patterns
 
-- **Command dispatcher**: `src/houdinimcp/server.py:execute_command()` routes by command type string to handler methods.
+- **Handler modules**: Standalone functions in `handlers/*.py` that import `hou` directly. Dispatched via dict in `server.py:_get_handlers()`.
+- **`_send_tool_command()` helper**: All MCP tool wrappers in the bridge use this to send commands and handle errors uniformly.
 - **Global connection singleton**: `houdini_mcp_server.py` reuses one TCP connection across all MCP tool calls.
-- **Conditional imports**: `HoudiniMCPRender` import is guarded (runs inside Houdini only).
+- **Dangerous code guard**: `handlers/code.py` blocks `os.remove`, `subprocess`, `hou.exit`, etc. unless `allow_dangerous=True`.
+- **Event deduplication**: `EventCollector` collapses rapid-fire events (same type + path within 100ms) into one.
+- **BM25 docs search**: `houdini_rag.py` is pure stdlib — no external deps. Index lazy-loaded on first search.
 
 ## Dependencies
 
 - **Python:** 3.12+ (see `.python-version`)
-- **Package manager:** `uv`
+- **Package manager:** `uv` (or pip)
 - Declared in `pyproject.toml`: `mcp[cli]>=1.4.1`
 - Houdini-side code depends on `hou`, `PySide2`, and standard library modules
+- `houdini_rag.py` has zero external dependencies (stdlib only)
 
-## Phased Implementation Plans
+## Testing
 
-See `docs/` for phased plans:
-- **Phase 0**: Remove all OPUS/RapidAPI code
-- **Phase 1**: Expand to ~22 tools (wiring, scene management, parameters, animation, geometry)
-- **Phase 2**: Add PDG/USD/HDA/batch/export (~36 tools), refactor into `handlers/` and `tools/` subdirs
-- **Phase 3**: Offline Houdini docs search (BM25, zero external deps)
+69 tests across 5 test files:
+- `test_bridge_connection.py` — HoudiniConnection (AST extraction, mock TCP server)
+- `test_server_commands.py` — command dispatcher, handlers, MUTATING_COMMANDS, events
+- `test_houdini_rag.py` — tokenizer, BM25 index, search, document loading
+- `test_event_collector.py` — EventCollector with mocked hou callbacks
+- `test_terminal.py` — ANSI stripping, terminal constants
+
+All tests run without Houdini. `server.py` tests mock `hou`, `PySide2`, `numpy`. `houdini_mcp_server.py` tests use AST extraction to avoid FastMCP side effects.
 
 ---
 
