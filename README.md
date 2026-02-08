@@ -1,143 +1,82 @@
 # HoudiniMCP – Connect Houdini to Claude via Model Context Protocol
 
-**HoudiniMCP** allows you to control **SideFX Houdini** from **Claude** using the **Model Context Protocol (MCP)**. It consists of:
+**HoudiniMCP** allows you to control **SideFX Houdini** from **Claude** using the **Model Context Protocol (MCP)**. It provides:
 
-1. A **Houdini plugin** (Python package) that listens on a local port (default `localhost:9876`) and handles commands (creating and modifying nodes, executing code, etc.).
-2. An **MCP bridge script** you run via **uv** (or system Python) that communicates via **std**in/**std**out with Claude and **TCP** with Houdini.
+- **41 MCP tools** for nodes, rendering, geometry, PDG/TOPs, USD/Solaris, HDAs, scene management, and more
+- **Offline documentation search** (BM25) across 11,000+ Houdini doc pages
+- **Event system** for bidirectional communication (Houdini pushes scene changes to Claude)
+- **Embedded Claude terminal** panel inside Houdini's UI with tabbed sessions
 
-Below are the complete instructions for setting up Houdini, uv, and Claude Desktop.
-
----
-
-## Table of Contents
-
-1. [Requirements](#requirements)
-2. [Houdini MCP Plugin Installation](#houdini-mcp-plugin-installation)
-   1. [Folder Layout](#folder-layout)
-   2. [Automated Install](#automated-install)
-   3. [Shelf Tool (Optional)](#shelf-tool-optional)
-   4. [Packages Integration (Optional)](#packages-integration-optional)
-3. [Installing the `mcp` Python Package](#installing-the-mcp-python-package)
-   1. [Using uv on Windows](#using-uv-on-windows)
-   2. [Using pip Directly](#using-pip-directly)
-4. [Bridging Script and Claude for Desktop](#bridging-script-and-claude-for-desktop)
-   1. [The Bridging Script](#the-bridging-script)
-   2. [Telling Claude Desktop to Use Your Script](#telling-claude-desktop-to-use-your-script)
-5. [Testing & Usage](#testing--usage)
-6. [Troubleshooting](#troubleshooting)
-
----
-
-## Requirements
-
-- **SideFX Houdini**
-- **uv**
-- **Claude Desktop** (latest version)
-
----
-
-## 1. Houdini MCP Plugin Installation
-
-### 1.1 Folder Layout
-
-The plugin source files live under `src/houdinimcp/`:
+## Architecture
 
 ```
+Claude (MCP stdio) → houdini_mcp_server.py (Bridge) → TCP:9876 → server.py (Houdini Plugin) → hou API
+                   ↘ houdini_rag.py (docs search, local)
+```
+
+## Repository Structure
+
+```
+houdini_mcp_server.py          # MCP bridge entry point (uv run)
+houdini_rag.py                 # BM25 docs search engine (stdlib only)
+pyproject.toml
 src/houdinimcp/
-    __init__.py             # Plugin init (auto-start server)
-    server.py               # Houdini-side TCP server + command dispatcher
-    HoudiniMCPRender.py     # Rendering utilities
-    claude_terminal.py      # Embedded Claude terminal panel
-    ClaudeTerminal.pypanel  # Houdini panel definition
+    __init__.py                # Plugin init (auto-start server)
+    server.py                  # Houdini-side TCP server + command dispatcher
+    handlers/                  # Handler modules by category
+        scene.py               #   Scene management (save, load, frame, info)
+        nodes.py               #   Node operations (create, modify, connect, flags)
+        code.py                #   Code execution with safety guard
+        geometry.py            #   Geometry inspection and export
+        pdg.py                 #   PDG/TOPs (cook, status, work items)
+        lop.py                 #   USD/Solaris (stages, prims, layers)
+        hda.py                 #   HDA management (list, install, create)
+        rendering.py           #   Rendering (OpenGL, Karma, Mantra, flipbook)
+    event_collector.py         # Event system (scene/node/frame callbacks)
+    HoudiniMCPRender.py        # Rendering utilities (camera rig, bbox)
+    claude_terminal.py         # Embedded Claude terminal panel
+    ClaudeTerminal.pypanel     # Houdini panel XML definition
 scripts/
-    install.py              # Automated installer
-    launch.py               # Launch helper
-tests/                      # Test suite
-docs/                       # Implementation plans and roadmaps
+    install.py                 # Install plugin into Houdini prefs
+    launch.py                  # Launch Houdini and/or MCP bridge
+    fetch_houdini_docs.py      # Download Houdini docs and build search index
+tests/                         # pytest test suite (69 tests)
+docs/                          # User guides and implementation plans
 ```
 
-These files need to be copied into your Houdini scripts directory:
-`C:/Users/YourUserName/Documents/houdini20.5/scripts/python/houdinimcp/`
+---
 
-### 1.2 Automated Install
+## Quick Start
 
-The easiest way to install the plugin:
+### 1. Install the Houdini Plugin
 
 ```bash
-python scripts/install.py                        # Auto-detect Houdini version
-python scripts/install.py --houdini-version 20.5 # Specify Houdini version
-python scripts/install.py --dry-run              # Preview without changes
+# Auto-detect Houdini version and install
+python scripts/install.py
+
+# Or specify version explicitly
+python scripts/install.py --houdini-version 20.5
+
+# Preview without changing anything
+python scripts/install.py --dry-run
 ```
 
-This copies the plugin files and creates a Houdini packages JSON for auto-loading.
+This copies plugin files to your Houdini preferences directory and creates a packages JSON for auto-loading.
 
-### 1.3 Shelf Tool
+### 2. Install MCP Dependencies
 
-Create a **Shelf Tool** to toggle the server in Houdini:
+```bash
+# Using uv (recommended)
+cd /path/to/houdini-mcp
+uv add "mcp[cli]"
 
-1. **Right-click** a shelf → **"New Shelf..."**
-
-Name it "MCP" or something similar
-
-
-
-2. **Right-click** again → **"New Tool..."**
-Name: "Toggle MCP Server"
-Label: "MCP"
-
-3. Under **Script**, insert something like:
-
-```python
-   import hou
-   import houdinimcp
-
-   if hasattr(hou.session, "houdinimcp_server") and hou.session.houdinimcp_server:
-       houdinimcp.stop_server()
-       hou.ui.displayMessage("Houdini MCP Server stopped")
-   else:
-       houdinimcp.start_server()
-       hou.ui.displayMessage("Houdini MCP Server started on localhost:9876")
-
+# Or using pip
+pip install "mcp[cli]"
 ```
 
+### 3. Configure Claude Desktop
 
-### 1.4 Packages Integration
-
-If you want Houdini to auto-load your plugin at startup, create a package file named houdinimcp.json in the Houdini packages folder (e.g. C:/Users/YourUserName/Documents/houdini20.5/packages/):
-```json
-{
-  "path": "$HOME/houdini20.5/scripts/python/houdinimcp",
-  "load_package_once": true,
-  "version": "0.1",
-  "env": [
-    {
-      "PYTHONPATH": "$PYTHONPATH;$HOME/houdini20.5/scripts/python"
-    }
-  ]
-}
-```
-
-### 2 Using uv on Windows
-```powershell
-  # 1) Install uv
-  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-  # 2) add uv to your PATH (depends on the user instructions) from cmd
-  set Path=C:\Users\<YourUserName>\.local\bin;%Path%
-
-  # 3) In the project directory
-  cd /path/to/houdini-mcp
-  uv add "mcp[cli]"
-
-  # 4) Verify
-  uv run python -c "import mcp.server.fastmcp; print('MCP is installed!')"
-```
-### 3 Telling Claude for Desktop to Use Your Script
-Go to File > Settings > Developer > Edit Config >
-Open or create:
-claude_desktop_config.json
-
-Add an entry:
+Go to **File > Settings > Developer > Edit Config** and add:
 
 ```json
 {
@@ -153,17 +92,175 @@ Add an entry:
   }
 }
 ```
-if uv run was successful and claude failed to load mcp, make sure claude is using the same python version, use:
-```cmd
-  python -c "import sys; print(sys.executable)"
+
+### 4. (Optional) Set Up Documentation Search
+
+```bash
+# Downloads Houdini docs and builds the BM25 index
+python scripts/fetch_houdini_docs.py
 ```
-to find python, and replace "python" with the path you got.
 
-### 4 Use Cursor
-Go to Settings > MCP > add new MCP server
-add the same entry in claude_desktop_config.json
-you might need to stop claude and restart houdini and the server
+This enables the `search_docs` and `get_doc` tools — they work offline without a Houdini connection.
 
-### 5 Acknowledgement
+---
 
-Houdini-MCP was built following [blender-mcp](https://github.com/ahujasid/blender-mcp). We thank them for the contribution.
+## MCP Tools Reference
+
+### Scene Management
+| Tool | Description |
+|------|-------------|
+| `ping` | Health check — verify Houdini is connected |
+| `get_connection_status` | Connection info (port, command count, timing) |
+| `get_scene_info` | Scene summary (file, frame, FPS, node counts) |
+| `save_scene` | Save current scene, optionally to a new path |
+| `load_scene` | Load a .hip file |
+| `set_frame` | Set the playbar frame |
+
+### Node Operations
+| Tool | Description |
+|------|-------------|
+| `create_node` | Create a node (type, parent, name) |
+| `modify_node` | Rename, reposition, or change parameters |
+| `delete_node` | Delete a node by path |
+| `get_node_info` | Inspect a node (type, parms, inputs, outputs) |
+| `connect_nodes` | Wire src output → dst input |
+| `disconnect_node_input` | Disconnect a specific input |
+| `set_node_flags` | Set display/render/bypass flags |
+| `set_node_color` | Set a node's color [r, g, b] |
+| `layout_children` | Auto-layout child nodes |
+| `find_error_nodes` | Scan hierarchy for cook errors |
+
+### Code Execution
+| Tool | Description |
+|------|-------------|
+| `execute_houdini_code` | Run Python code in Houdini (with safety guard) |
+
+### Materials
+| Tool | Description |
+|------|-------------|
+| `set_material` | Create or apply a material to an OBJ node |
+
+### Parameters & Animation
+| Tool | Description |
+|------|-------------|
+| `set_expression` | Set an HScript or Python expression on a parm |
+
+### Geometry
+| Tool | Description |
+|------|-------------|
+| `get_geo_summary` | Point/prim/vertex counts, bbox, attributes |
+| `geo_export` | Export geometry (obj, gltf, glb, usd, ply, bgeo.sc) |
+
+### Rendering
+| Tool | Description |
+|------|-------------|
+| `render_single_view` | Render a single viewport (OpenGL/Karma/Mantra) |
+| `render_quad_views` | Render 4 canonical views |
+| `render_specific_camera` | Render from a specific camera node |
+| `render_flipbook` | Render a flipbook sequence |
+
+### PDG/TOPs
+| Tool | Description |
+|------|-------------|
+| `pdg_cook` | Start cooking a TOP network |
+| `pdg_status` | Get cook status and work item counts |
+| `pdg_workitems` | List work items (optionally by state) |
+| `pdg_dirty` | Dirty work items for re-cooking |
+| `pdg_cancel` | Cancel a running PDG cook |
+
+### USD/Solaris (LOP)
+| Tool | Description |
+|------|-------------|
+| `lop_stage_info` | USD stage summary (prims, layers, time) |
+| `lop_prim_get` | Inspect a specific USD prim |
+| `lop_prim_search` | Search prims by pattern and type |
+| `lop_layer_info` | USD layer stack info |
+| `lop_import` | Import USD via reference or sublayer |
+
+### HDA Management
+| Tool | Description |
+|------|-------------|
+| `hda_list` | List available HDA definitions |
+| `hda_get` | Detailed info about an HDA |
+| `hda_install` | Install an HDA file into the session |
+| `hda_create` | Create an HDA from an existing node |
+
+### Batch Operations
+| Tool | Description |
+|------|-------------|
+| `batch` | Execute multiple operations atomically |
+
+### Event System
+| Tool | Description |
+|------|-------------|
+| `get_houdini_events` | Get pending Houdini events (scene/node/frame changes) |
+| `subscribe_houdini_events` | Configure which event types to collect |
+
+### Documentation Search (offline)
+| Tool | Description |
+|------|-------------|
+| `search_docs` | BM25 search across Houdini docs (no Houdini needed) |
+| `get_doc` | Read full content of a doc page |
+
+---
+
+## Embedded Claude Terminal
+
+The plugin includes a dockable Python Panel that runs Claude Code inside Houdini:
+
+- **Window > Python Panels > Claude Terminal**
+- Tabbed sessions, font size control, dark/light theme
+- Context injection: "Send Selection" and "Send Scene Info" buttons
+- Auto-restart on unexpected exit
+- Keyboard shortcuts: Ctrl+Shift+C (copy), Ctrl+=/- (font size)
+
+---
+
+## Shelf Tool (Optional)
+
+Create a shelf tool to toggle the MCP server:
+
+```python
+import hou
+import houdinimcp
+
+if hasattr(hou.session, "houdinimcp_server") and hou.session.houdinimcp_server:
+    houdinimcp.stop_server()
+    hou.ui.displayMessage("Houdini MCP Server stopped")
+else:
+    houdinimcp.start_server()
+    hou.ui.displayMessage("Houdini MCP Server started on localhost:9876")
+```
+
+---
+
+## Using with Cursor
+
+Go to **Settings > MCP > Add new MCP server** and add the same config as Claude Desktop.
+
+---
+
+## Troubleshooting
+
+- **"Could not connect to Houdini"**: Ensure the plugin is loaded and the server is running on port 9876. Check the Houdini console for error messages.
+- **Claude can't find `mcp` package**: Verify `uv run python -c "import mcp; print('OK')"` works. If using system Python, ensure Claude Desktop is configured to use the same Python.
+- **Docs search returns error**: Run `python scripts/fetch_houdini_docs.py` to download the documentation corpus and build the index.
+- **Terminal panel not showing**: Ensure `ClaudeTerminal.pypanel` was installed to the `python_panels/` directory. Re-run `python scripts/install.py` if needed.
+
+---
+
+## Running Tests
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Run all tests
+pytest tests/ -v
+```
+
+---
+
+## Acknowledgements
+
+Houdini-MCP was built following [blender-mcp](https://github.com/ahujasid/blender-mcp). Documentation search engine based on [Houdini21MCP](https://github.com/orrzxz/Houdini21MCP).
