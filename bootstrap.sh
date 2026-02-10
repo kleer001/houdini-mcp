@@ -180,18 +180,106 @@ else
 fi
 
 # -------------------------------------------------------
-# Step 7: Print Claude Desktop config
+# Step 7: Configure MCP client
 # -------------------------------------------------------
-echo -e "\n${BOLD}Step 7: Claude Desktop configuration${NC}"
+echo -e "\n${BOLD}Step 7: MCP client configuration${NC}"
+
+HAVE_CLAUDE_CODE=false
+HAVE_CLAUDE_DESKTOP=false
+
+if command -v claude &>/dev/null; then
+    HAVE_CLAUDE_CODE=true
+    ok "Claude Code CLI detected"
+fi
 
 case "$OS" in
-    Linux)  config_dir="$HOME/.config/Claude" ;;
-    Darwin) config_dir="$HOME/Library/Application Support/Claude" ;;
+    Linux)  desktop_config="$HOME/.config/Claude/claude_desktop_config.json" ;;
+    Darwin) desktop_config="$HOME/Library/Application Support/Claude/claude_desktop_config.json" ;;
 esac
 
-echo -e "\nAdd this to your Claude Desktop config file:"
-echo -e "  ${CYAN}${config_dir}/claude_desktop_config.json${NC}\n"
-cat <<JSONEOF
+# Detect Claude Desktop by checking for the app binary
+case "$OS" in
+    Linux)
+        if command -v claude-desktop &>/dev/null || [ -d "/snap/claude-desktop" ]; then
+            HAVE_CLAUDE_DESKTOP=true
+        fi
+        ;;
+    Darwin)
+        if [ -d "/Applications/Claude.app" ]; then
+            HAVE_CLAUDE_DESKTOP=true
+        fi
+        ;;
+esac
+
+# Also count an existing config dir as evidence of Claude Desktop
+if [ -d "$(dirname "$desktop_config")" ]; then
+    HAVE_CLAUDE_DESKTOP=true
+fi
+
+if [ "$HAVE_CLAUDE_DESKTOP" = true ]; then
+    ok "Claude Desktop detected"
+fi
+
+configure_claude_code() {
+    info "Configuring Claude Code MCP server..."
+    claude mcp remove houdini 2>/dev/null || true
+    claude mcp add --transport stdio --scope user houdini -- \
+        uv --directory "$REPO_DIR" run python houdini_mcp_server.py
+    ok "Claude Code configured (verify with: claude mcp list)"
+}
+
+configure_claude_desktop() {
+    info "Configuring Claude Desktop MCP server..."
+    "$PYTHON" - "$desktop_config" "$REPO_DIR" <<'PYEOF'
+import json, sys, os
+config_file, repo_dir = sys.argv[1], sys.argv[2]
+config = {}
+if os.path.exists(config_file):
+    with open(config_file) as f:
+        config = json.load(f)
+config.setdefault("mcpServers", {})["houdini"] = {
+    "command": "uv",
+    "args": ["--directory", repo_dir, "run", "python", "houdini_mcp_server.py"]
+}
+os.makedirs(os.path.dirname(config_file), exist_ok=True)
+with open(config_file, "w") as f:
+    json.dump(config, f, indent=2)
+    f.write("\n")
+PYEOF
+    ok "Claude Desktop configured: $desktop_config"
+}
+
+if [ "$HAVE_CLAUDE_CODE" = true ] && [ "$HAVE_CLAUDE_DESKTOP" = true ]; then
+    echo -e "\nDetected both ${BOLD}Claude Code${NC} and ${BOLD}Claude Desktop${NC}."
+    echo "  1) Claude Code  (CLI)"
+    echo "  2) Claude Desktop (GUI)"
+    echo "  3) Both"
+    if [ -t 0 ]; then
+        read -rp "Configure which? [1/2/3]: " choice
+    else
+        info "Non-interactive mode — configuring both"
+        choice=3
+    fi
+    case "$choice" in
+        1) configure_claude_code ;;
+        2) configure_claude_desktop ;;
+        3) configure_claude_code; configure_claude_desktop ;;
+        *) warn "Invalid choice — skipping MCP configuration" ;;
+    esac
+elif [ "$HAVE_CLAUDE_CODE" = true ]; then
+    configure_claude_code
+elif [ "$HAVE_CLAUDE_DESKTOP" = true ]; then
+    configure_claude_desktop
+else
+    warn "Neither Claude Code nor Claude Desktop detected."
+    echo "  Install one of:"
+    echo "    Claude Code:    https://docs.anthropic.com/en/docs/claude-code"
+    echo "    Claude Desktop: https://claude.ai/download"
+    echo ""
+    echo "  Then re-run this script, or configure manually:"
+    echo "    Claude Code:    claude mcp add --transport stdio houdini -- uv --directory \"$REPO_DIR\" run python houdini_mcp_server.py"
+    echo "    Claude Desktop: Add to ${desktop_config}:"
+    cat <<JSONEOF
 {
   "mcpServers": {
     "houdini": {
@@ -207,7 +295,11 @@ cat <<JSONEOF
   }
 }
 JSONEOF
+fi
 
+# -------------------------------------------------------
+# Done
+# -------------------------------------------------------
 echo -e "\n${BOLD}${GREEN}=== Setup complete! ===${NC}"
 echo -e "  Repo:   ${REPO_DIR}"
 echo -e "  Venv:   ${REPO_DIR}/.venv/"

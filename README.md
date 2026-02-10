@@ -14,39 +14,13 @@ Claude (MCP stdio) → houdini_mcp_server.py (Bridge) → TCP:9876 → server.py
                    ↘ houdini_rag.py (docs search, local)
 ```
 
-## Repository Structure
-
-```
-houdini_mcp_server.py          # MCP bridge entry point (uv run)
-houdini_rag.py                 # BM25 docs search engine (stdlib only)
-pyproject.toml
-src/houdinimcp/
-    __init__.py                # Plugin init (auto-start server)
-    server.py                  # Houdini-side TCP server + command dispatcher
-    handlers/                  # Handler modules by category
-        scene.py               #   Scene management (save, load, frame, info)
-        nodes.py               #   Node operations (create, modify, connect, flags)
-        code.py                #   Code execution with safety guard
-        geometry.py            #   Geometry inspection and export
-        pdg.py                 #   PDG/TOPs (cook, status, work items)
-        lop.py                 #   USD/Solaris (stages, prims, layers)
-        hda.py                 #   HDA management (list, install, create)
-        rendering.py           #   Rendering (OpenGL, Karma, Mantra, flipbook)
-    event_collector.py         # Event system (scene/node/frame callbacks)
-    HoudiniMCPRender.py        # Rendering utilities (camera rig, bbox)
-    claude_terminal.py         # Embedded Claude terminal panel
-    ClaudeTerminal.pypanel     # Houdini panel XML definition
-scripts/
-    install.py                 # Install plugin into Houdini prefs
-    launch.py                  # Launch Houdini and/or MCP bridge
-    fetch_houdini_docs.py      # Download Houdini docs and build search index
-tests/                         # pytest test suite (69 tests)
-docs/                          # User guides and implementation plans
-```
-
 ---
 
 ## Quick Start
+
+### Install Size
+
+The full install (repo, venv, dependencies, and Houdini offline docs) is approximately **~1 GB**, most of which is the documentation corpus for offline search.
 
 ### One-Liner Install
 
@@ -60,7 +34,7 @@ curl -sSL https://raw.githubusercontent.com/kleer001/houdini-mcp/main/bootstrap.
 powershell -c "irm https://raw.githubusercontent.com/kleer001/houdini-mcp/main/bootstrap.bat -OutFile bootstrap.bat; .\bootstrap.bat"
 ```
 
-The bootstrap script handles everything: clones the repo, installs [uv](https://docs.astral.sh/uv/) (to `~/.local/bin`), creates a venv, installs deps, sets up the Houdini plugin, downloads offline docs (~100 MB), and prints the Claude Desktop config snippet. Re-run from inside the repo at any time — it's idempotent.
+The bootstrap script handles everything: clones the repo, installs [uv](https://docs.astral.sh/uv/), creates a venv, installs deps, sets up the Houdini plugin, optionally downloads offline docs, and configures your MCP client (Claude Code or Claude Desktop). Re-run from inside the repo at any time — it's idempotent.
 
 **Prerequisites:** git and Python 3.12+ must be installed. Houdini is optional at setup time.
 
@@ -93,9 +67,14 @@ uv sync
 pip install "mcp[cli]"
 ```
 
-#### 3. Configure Claude Desktop
+#### 3. Configure Your MCP Client
 
-Go to **File > Settings > Developer > Edit Config** and add:
+**Claude Code (CLI):**
+```bash
+claude mcp add --transport stdio houdini -- uv --directory /path/to/houdini-mcp run python houdini_mcp_server.py
+```
+
+**Claude Desktop:** Go to **File > Settings > Developer > Edit Config** and add:
 
 ```json
 {
@@ -117,7 +96,7 @@ Go to **File > Settings > Developer > Edit Config** and add:
 #### 4. Set Up Documentation Search
 
 ```bash
-# Downloads Houdini docs and builds the BM25 index (~100 MB)
+# Downloads Houdini docs and builds the BM25 index (~1 GB)
 python scripts/fetch_houdini_docs.py
 ```
 
@@ -127,7 +106,8 @@ This enables the `search_docs` and `get_doc` tools — they work offline without
 
 ---
 
-## MCP Tools Reference
+<details>
+<summary><strong>MCP Tools Reference (41 tools)</strong></summary>
 
 ### Scene Management
 | Tool | Description |
@@ -225,6 +205,8 @@ This enables the `search_docs` and `get_doc` tools — they work offline without
 | `search_docs` | BM25 search across Houdini docs (no Houdini needed) |
 | `get_doc` | Read full content of a doc page |
 
+</details>
+
 ---
 
 ## Embedded Claude Terminal
@@ -252,33 +234,11 @@ The shelf is installed automatically by `scripts/install.py` (or the bootstrap s
 
 ---
 
-## Using with Cursor
-
-Go to **Settings > MCP > Add new MCP server** and add the same config as Claude Desktop.
-
----
-
-## Troubleshooting
-
-- **"Could not connect to Houdini"**: Ensure the plugin is loaded and the server is running on port 9876. Check the Houdini console for error messages.
-- **Claude can't find `mcp` package**: Verify `uv run python -c "import mcp; print('OK')"` works. If using system Python, ensure Claude Desktop is configured to use the same Python.
-- **Docs search returns error**: Run `python scripts/fetch_houdini_docs.py` to download the documentation corpus and build the index.
-- **Terminal panel not showing**: Ensure `ClaudeTerminal.pypanel` was installed to the `python_panels/` directory. Re-run `python scripts/install.py` if needed.
-
----
-
-## Running Tests
-
-```bash
-# Activate the virtual environment
-source .venv/bin/activate
-
-# Run all tests
-pytest tests/ -v
-```
-
----
-
 ## Acknowledgements
 
-Houdini-MCP was built following [blender-mcp](https://github.com/ahujasid/blender-mcp). Documentation search engine based on [Houdini21MCP](https://github.com/orrzxz/Houdini21MCP).
+HoudiniMCP builds on the work of several open-source projects:
+
+- [blender-mcp](https://github.com/ahujasid/blender-mcp) by ahujasid — architectural inspiration (MCP bridge + TCP socket pattern)
+- [capoomgit/houdini-mcp](https://github.com/capoomgit/houdini-mcp) by capoomgit — first full-featured Houdini MCP implementation
+- [eetumartola/houdini-mcp](https://github.com/eetumartola/houdini-mcp) by eetumartola — early Houdini MCP implementation
+- [Houdini21MCP](https://github.com/orrzxz/Houdini21MCP) by orrzxz — documentation search engine

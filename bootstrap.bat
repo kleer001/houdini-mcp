@@ -158,18 +158,63 @@ if exist "houdini_docs_index.json" (
 )
 
 REM -------------------------------------------------------
-REM Step 7: Print Claude Desktop config
+REM Step 7: Configure MCP client
 REM -------------------------------------------------------
 echo.
-echo Step 7: Claude Desktop configuration
+echo Step 7: MCP client configuration
 
-REM Build forward-slash path for JSON
+set "HAVE_CLAUDE_CODE=0"
+set "HAVE_CLAUDE_DESKTOP=0"
+
+where claude >nul 2>&1
+if !errorlevel! equ 0 (
+    set "HAVE_CLAUDE_CODE=1"
+    echo [OK]   Claude Code CLI detected
+)
+
+set "DESKTOP_CONFIG=%APPDATA%\Claude\claude_desktop_config.json"
+
+REM Detect Claude Desktop by app or existing config dir
+if exist "%LOCALAPPDATA%\Programs\claude-desktop" (
+    set "HAVE_CLAUDE_DESKTOP=1"
+)
+if exist "%APPDATA%\Claude" (
+    set "HAVE_CLAUDE_DESKTOP=1"
+)
+
+if !HAVE_CLAUDE_DESKTOP! equ 1 (
+    echo [OK]   Claude Desktop detected
+)
+
+REM Build forward-slash repo path for JSON
 set "JSON_PATH=%REPO_DIR:\=/%"
 
+if !HAVE_CLAUDE_CODE! equ 1 if !HAVE_CLAUDE_DESKTOP! equ 1 (
+    echo.
+    echo Detected both Claude Code and Claude Desktop.
+    echo   1^) Claude Code  (CLI^)
+    echo   2^) Claude Desktop (GUI^)
+    echo   3^) Both
+    set /p "MCP_CHOICE=Configure which? [1/2/3]: "
+    if "!MCP_CHOICE!"=="1" goto :cfg_code_only
+    if "!MCP_CHOICE!"=="2" goto :cfg_desktop_only
+    if "!MCP_CHOICE!"=="3" goto :cfg_both
+    echo [!!]   Invalid choice — skipping MCP configuration
+    goto :cfg_done
+)
+
+if !HAVE_CLAUDE_CODE! equ 1 goto :cfg_code_only
+if !HAVE_CLAUDE_DESKTOP! equ 1 goto :cfg_desktop_only
+
+REM Neither detected — print manual instructions
+echo [!!]   Neither Claude Code nor Claude Desktop detected.
+echo   Install one of:
+echo     Claude Code:    https://docs.anthropic.com/en/docs/claude-code
+echo     Claude Desktop: https://claude.ai/download
 echo.
-echo Add this to your Claude Desktop config file:
-echo   %APPDATA%\Claude\claude_desktop_config.json
-echo.
+echo   Then re-run this script, or configure manually:
+echo     Claude Code:    claude mcp add --transport stdio houdini -- uv --directory "%REPO_DIR%" run python houdini_mcp_server.py
+echo     Claude Desktop: Add to %DESKTOP_CONFIG%:
 echo {
 echo   "mcpServers": {
 echo     "houdini": {
@@ -184,7 +229,39 @@ echo       ]
 echo     }
 echo   }
 echo }
+goto :cfg_done
 
+:cfg_both
+call :do_cfg_code
+call :do_cfg_desktop
+goto :cfg_done
+
+:cfg_code_only
+call :do_cfg_code
+goto :cfg_done
+
+:cfg_desktop_only
+call :do_cfg_desktop
+goto :cfg_done
+
+:do_cfg_code
+echo [..]   Configuring Claude Code MCP server...
+claude mcp remove houdini >nul 2>&1
+claude mcp add --transport stdio --scope user houdini -- uv --directory "%REPO_DIR%" run python houdini_mcp_server.py
+echo [OK]   Claude Code configured (verify with: claude mcp list)
+goto :eof
+
+:do_cfg_desktop
+echo [..]   Configuring Claude Desktop MCP server...
+!PYTHON! -c "import json,sys,os;cf=r'%DESKTOP_CONFIG%';rd=r'%REPO_DIR%';c=json.load(open(cf)) if os.path.exists(cf) else {};c.setdefault('mcpServers',{})['houdini']={'command':'uv','args':['--directory',rd,'run','python','houdini_mcp_server.py']};os.makedirs(os.path.dirname(cf),exist_ok=True);f=open(cf,'w');json.dump(c,f,indent=2);f.write('\n');f.close()"
+echo [OK]   Claude Desktop configured: %DESKTOP_CONFIG%
+goto :eof
+
+:cfg_done
+
+REM -------------------------------------------------------
+REM Done
+REM -------------------------------------------------------
 echo.
 echo === Setup complete! ===
 echo   Repo:   %REPO_DIR%
