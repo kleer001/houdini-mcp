@@ -15,6 +15,11 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
   - [COP HDA Output Naming](#cop-hda-output-naming)
   - [Resolution Mismatch at Sequence Boundaries](#resolution-mismatch-at-sequence-boundaries)
   - [HDA matchCurrentDefinition Resets Internals](#hda-matchcurrentdefinition-resets-internals)
+  - [COP VEX Wrangle: volumesamplep Is Input-0-Only](#cop-vex-wrangle-volumesamplep-is-input-0-only)
+  - [COP VEX Wrangle: Coordinate System Is Image Space](#cop-vex-wrangle-coordinate-system-is-image-space)
+  - [COP HDA Callbacks Cannot Modify Internal Node Parms](#cop-hda-callbacks-cannot-modify-internal-node-parms)
+  - [COP HDA: Prototype Parm Expressions Don't Persist](#cop-hda-prototype-parm-expressions-dont-persist)
+  - [HScript Menu Parm Conditionals Require Integer Comparisons](#hscript-menu-parm-conditionals-require-integer-comparisons)
 - [COP2 (Legacy Compositing)](#cop2-legacy-compositing)
   - [COP2 VEX Filter Custom Shaders](#cop2-vex-filter-custom-shaders)
   - [Copernicus to COP2 Translation](#copernicus-to-cop2-translation)
@@ -196,6 +201,107 @@ if echo_layer.bufferResolution() != (width, height):
 **Anti-pattern:** Unlocked an HDA with `allowEditingOfContents()`, created a null node inside, wired it into the chain, then called `matchCurrentDefinition()` to refresh the outer node. The null node disappeared and the internal chain reverted to the saved definition.
 
 **Fix:** Make all changes to the HDA definition (DialogScript, parm template, etc.) BEFORE calling `matchCurrentDefinition()`. Or save the definition (`hda_def.save()`) after internal edits and before refreshing.
+
+### COP VEX Wrangle: `volumesamplep` Is Input-0-Only
+
+> Houdini 21.0
+
+**`volumesamplep(input, "layer", pos)` silently returns `{0,0,0}` for any `input` other than `0`.** There is no error, no warning, and no cook failure — just black pixels.
+
+**Anti-pattern:** Wrangle with source at input 0 (resample) and original image at input 1. Used `volumesamplep(1, "C", tiled_pos)` to sample the original at a custom UV. Always returned zero.
+
+**Fix:** Only input 0 is accessible for custom-position sampling via `volumesamplep`. If you need to sample a different COP input at arbitrary positions, restructure so that input is connected at slot 0. For tiling specifically: force the resample to STRETCH fit mode so its image space is identical to the source's, then sample `volumesamplep(0, "C", tiled_pos)` on the resample — it gives the same result as sampling the source directly.
+
+**Note:** `volumeres(input, "layer")` has the same limitation — returns 0 for non-zero input indices and for layer names that don't exist on the input. Read source dimensions from HDA hidden parms set by Python callbacks instead.
+
+### COP VEX Wrangle: Coordinate System Is Image Space
+
+> Houdini 21.0
+
+**In a COP wrangle, `@P` is in image space — `(-1, -1)` at top-left to `(+1, +1)` at bottom-right — not pixel indices.** `volumesamplep` expects image-space coordinates.
+
+**Verified:** At pixel `(0, 0)` of a 1024-wide image, `@P.x ≈ -0.999`. At pixel `(1023, 0)`, `@P.x ≈ +0.999`.
+
+**Coordinate conversion from tile UV (0..1) to image space:**
+
+```c
+// Naïve — lands on cell boundaries at u=0.25, 0.5 etc.; bilinear bleed produces 0.5 gray
+float ip_x = 2.0f * u - 1.0f;
+
+// Correct — shifts to voxel center; avoids boundary interpolation
+float ip_x = 2.0f * u - 1.0f + 1.0f / src_w;
+```
+
+The `+ 1/src_w` half-pixel shift matters whenever your UV lands near a voxel boundary (e.g. at checkerboard cell edges). Without it, bilinear interpolation between a white and a black cell produces 0.5.
+
+**Pixel reads from Python:** Use `layer.bufferIndex(x, y)` to read individual pixels — not `.pixel()` (doesn't exist on `hou.ImageLayer`). `bufferIndexV4(x, y)` returns all four channels.
+
+### COP HDA Callbacks Cannot Modify Internal Node Parms
+
+> Houdini 21.0
+
+**Python callbacks (`OnCreated`, `OnParmChanged`, `OnInputChanged`) raise `hou.PermissionError: locked assets` if they attempt to call `parm.set()` on any node inside the HDA's locked subnet.**
+
+**Anti-pattern:** `onParmChanged` computed a fit mode integer and called `resample.parm("stretch").set(computed_value)` on the internal resample node. Raised `PermissionError` at cook time.
+
+**Fix:** Callbacks may only modify the HDA's **own** parameters. Drive internal node parms exclusively via HScript channel-reference expressions baked in at build time:
+
+```python
+# At HDA build time — expressions are locked in permanently:
+rs.parm("stretch").setExpression('ch("../fit_mode")', language=hou.exprLanguage.Hscript)
+
+# In OnParmChanged — only touch the HDA's own parms:
+def onParmChanged(kwargs):
+    node = kwargs["node"]
+    node.parm("_computed_res_w").set(...)   # HDA's own hidden parm — OK
+    # node.parm("internal_rs_parm").set()  # PermissionError — never do this
+```
+
+### COP HDA: Prototype Parm Expressions Don't Persist
+
+> Houdini 21.0
+
+**`parm.setExpression()` called on the prototype/build instance of an HDA is an instance-level override. It is NOT saved into the HDA type definition.** New instances created from the saved HDA get the default value (e.g. `0`), never the expression.
+
+**Anti-pattern:** After `hda_def.setParmTemplateGroup(ptg)` and before `hda_def.save()`, called `hda_node.parm("tile_mode_int").setExpression('ch("tile_mode")')`. The build instance had the expression. Every new instance of the HDA evaluated `tile_mode_int` as `0`.
+
+**Symptom:** A hidden integer mirror parm always reads its default value regardless of what the source menu parm is set to.
+
+**Fix:** Maintain integer-mirror parms via Python callbacks, not expressions:
+
+```python
+# In onCreated AND _update():
+node.parm("tile_mode_int").set(node.parm("tile_mode").eval())
+```
+
+**Also note:** In headless hython, `parm.set()` does **not** fire `OnParmChanged` event handlers. When testing, call your update function manually: `node.hdaModule()._update(node)`.
+
+### HScript Menu Parm Conditionals Require Integer Comparisons
+
+> Houdini 21.0
+
+**Using `chs("parm") == "token"` in an HScript expression causes a "Bad data type for function or operation" cook error.** No visual feedback during build — the error only surfaces when the node cooks.
+
+**Anti-pattern:**
+
+```python
+# Breaks at cook time:
+FILTER_EXPR = 'if(chs("../filter_mode")=="auto", 4, if(chs(...)==..., ...))'
+```
+
+**Fix:** Menu parms (`MenuParmTemplate`) store integer indices. Use `ch("parm")` (not `chs`) and compare against the zero-based index:
+
+```python
+# Works — compare index integers, not token strings:
+FILTER_EXPR = (
+    'if(ch("../filter_mode")==0, 4, '   # auto → catmull-rom
+    'if(ch("../filter_mode")==1, 0, '   # point
+    # ...
+    '1))'
+)
+```
+
+The token strings shown in the UI (`"auto"`, `"point"`) are only accessible via `chs()`, but `chs()` comparisons in `if()` expressions do not work. Always use the integer index from `ch()`.
 
 ---
 
