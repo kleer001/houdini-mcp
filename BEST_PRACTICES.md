@@ -20,6 +20,7 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
   - [COP HDA Callbacks Cannot Modify Internal Node Parms](#cop-hda-callbacks-cannot-modify-internal-node-parms)
   - [COP HDA: Prototype Parm Expressions Don't Persist](#cop-hda-prototype-parm-expressions-dont-persist)
   - [HScript Menu Parm Conditionals Require Integer Comparisons](#hscript-menu-parm-conditionals-require-integer-comparisons)
+  - [HDA OnParmChanged Event Section Does Not Fire](#hda-onparmchanged-event-section-does-not-fire)
 - [COP2 (Legacy Compositing)](#cop2-legacy-compositing)
   - [COP2 VEX Filter Custom Shaders](#cop2-vex-filter-custom-shaders)
   - [Copernicus to COP2 Translation](#copernicus-to-cop2-translation)
@@ -302,6 +303,34 @@ FILTER_EXPR = (
 ```
 
 The token strings shown in the UI (`"auto"`, `"point"`) are only accessible via `chs()`, but `chs()` comparisons in `if()` expressions do not work. Always use the integer index from `ch()`.
+
+### HDA OnParmChanged Event Section Does Not Fire
+
+> Houdini 21.0
+
+**Adding an `OnParmChanged` section to an HDA definition has no effect — Houdini does not fire it when parameters change.** The section is stored silently and never called. `OnCreated` and `OnInputChanged` are the only reliably fired interactive HDA events.
+
+**Anti-pattern:**
+
+```python
+hda_def.addSection("OnParmChanged", "kwargs['node'].hdaModule().onParmChanged(kwargs)")
+hda_def.setExtraFileOption("OnParmChanged/IsPython", True)
+# Never fires — parameters changing in the UI do nothing.
+```
+
+**Fix:** Set `script_callback` on each `ParmTemplate` that needs to trigger Python when changed. This fires on interactive edits and is stored in the HDA type definition, so it persists to every new instance without per-instance setup:
+
+```python
+def _cb(pt):
+    pt.setScriptCallback("kwargs['node'].hdaModule().onParmChanged(kwargs)")
+    pt.setScriptCallbackLanguage(hou.scriptLanguage.Python)
+    return pt
+
+width_pt = hou.IntParmTemplate("width", "Width", 1)
+_cb(width_pt)
+```
+
+`kwargs['node']` is the node, `kwargs['parm_name']` is the changed parameter name, `kwargs['script_value']` is the new value.
 
 ---
 
