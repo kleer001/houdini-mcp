@@ -34,6 +34,8 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
 - [SOPs / File Cache](#sops--file-cache)
   - [parm.set() Silently Ignored When Expression Active](#parmset-silently-ignored-when-expression-active)
   - [hbatch render Only Works with ROPs, Not SOPs](#hbatch-render-only-works-with-rops-not-sops)
+- [HScript / Run Script](#hscript--run-script)
+  - [File > Run Script Only Accepts .cmd, Not .py](#file--run-script-only-accepts-cmd-not-py)
 - [General MCP Usage](#general-mcp-usage)
   - [Connection Discipline](#connection-discipline)
   - [Node Inspection Caveats](#node-inspection-caveats)
@@ -547,6 +549,26 @@ node.parm("execute").pressButton()
 `pressButton()` is synchronous in hython — it blocks until all frames are written.
 
 ---
+
+## HScript / Run Script
+
+### File > Run Script Only Accepts .cmd, Not .py
+
+> Houdini 21.0.631
+
+**The File > Run Script... menu maps to HScript's `source` command, which parses HScript only.** Picking a `.py` file fails with `Application doesn't support input redirection` (HScript tries to interpret the Python content). Renaming a Python file to `.cmd` doesn't help — same parser, same failure.
+
+**Anti-pattern:** Shipped a plugin's setup as `<plugin>_setup.py` and told users to File > Run Script it. Users hit cryptic HScript parse errors on the first non-comment line.
+
+**Fix — dispatcher pattern:** Ship a tiny `.cmd` that resolves its own path via `$arg0` and exec's a sibling `.py`:
+
+```
+python -c "import os; p=os.path.join(os.path.dirname(os.path.abspath(r'$arg0')),'setup.py'); exec(compile(open(p).read(),p,'exec'),{'__name__':'__main__','__file__':p})"
+```
+
+Two extra notes:
+- HScript's `python -c "..."` argument **must be a single line** — embedded newlines break because HScript reparses subsequent lines as commands. Backslash continuation joins lines but strips the newline.
+- `$arg0` inside a sourced `.cmd` evaluates to the `.cmd`'s own absolute path, which is the cleanest way to find sibling files (HDAs, .py modules) the user dropped next to it.
 
 ## General MCP Usage
 
