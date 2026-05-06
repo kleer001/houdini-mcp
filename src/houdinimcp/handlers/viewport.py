@@ -122,15 +122,24 @@ def set_viewport_direction(direction):
 
 
 def capture_screenshot(output_path=None):
-    """Capture a screenshot of the current viewport."""
+    """Capture a screenshot of the current viewport via single-frame flipbook.
+
+    `hou.GeometryViewport.saveAsImage` was removed in Houdini 21; the supported
+    path is a single-frame flipbook through the SceneViewer.
+    """
     import tempfile  # noqa: local import for optional temp path
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
     if not output_path:
         output_path = os.path.join(tempfile.gettempdir(), "mcp_screenshot.png")
-    viewport = viewer.curViewport()
-    viewport.saveAsImage(output_path)
+    output_path = output_path.replace("\\", "/")
+    frame = int(hou.frame())
+    settings = viewer.flipbookSettings().stash()
+    settings.frameRange((frame, frame))
+    settings.output(output_path)
+    settings.outputToMPlay(False)
+    viewer.flipbook(viewer.curViewport(), settings)
     return {"filepath": output_path}
 
 
