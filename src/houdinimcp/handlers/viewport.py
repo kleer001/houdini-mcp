@@ -140,6 +140,21 @@ def capture_screenshot(output_path=None):
     settings.output(output_path)
     settings.outputToMPlay(False)
     viewer.flipbook(viewer.curViewport(), settings)
+    # The flipbook writes straight-alpha RGBA; where the viewport background is
+    # transparent the alpha is ~0, so image viewers composite over white and the
+    # screenshot reads blank. Force the saved PNG opaque (keep RGB, drop alpha)
+    # so it's directly viewable. Best-effort — keep the raw capture if Qt is
+    # unavailable or the flatten fails.
+    try:
+        try:
+            from PySide6 import QtGui
+        except ImportError:
+            from PySide2 import QtGui
+        img = QtGui.QImage(output_path)
+        if not img.isNull() and img.hasAlphaChannel():
+            img.convertToFormat(QtGui.QImage.Format_RGB32).save(output_path)
+    except Exception:
+        pass
     return {"filepath": output_path}
 
 
