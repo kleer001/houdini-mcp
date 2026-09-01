@@ -173,7 +173,7 @@ def install(prefs_dir, source_dir, dry_run=False):
         print(f"  {json.dumps(package_json, indent=2)}")
     else:
         os.makedirs(packages_dir, exist_ok=True)
-        with open(package_file, "w") as f:
+        with open(package_file, "w", encoding="utf-8") as f:
             json.dump(package_json, f, indent=2)
         print(f"\n  Created package file: {package_file}")
 
@@ -190,7 +190,7 @@ def install(prefs_dir, source_dir, dry_run=False):
     if dry_run:
         print(f"  WRITE {mcp_config_path}")
     else:
-        with open(mcp_config_path, "w") as f:
+        with open(mcp_config_path, "w", encoding="utf-8") as f:
             json.dump(mcp_config, f, indent=2)
             f.write("\n")
         print(f"  Created MCP config: {mcp_config_path}")
@@ -202,7 +202,7 @@ def install(prefs_dir, source_dir, dry_run=False):
 
     existing_content = ""
     if os.path.isfile(pythonrc_path):
-        with open(pythonrc_path) as f:
+        with open(pythonrc_path, encoding="utf-8") as f:
             existing_content = f.read()
 
     if "import houdinimcp" in existing_content:
@@ -211,7 +211,7 @@ def install(prefs_dir, source_dir, dry_run=False):
         print(f"  APPEND '{import_line}' to {pythonrc_path}")
     else:
         os.makedirs(scripts_dir, exist_ok=True)
-        with open(pythonrc_path, "a") as f:
+        with open(pythonrc_path, "a", encoding="utf-8") as f:
             if existing_content and not existing_content.endswith("\n"):
                 f.write("\n")
             f.write(import_line + "\n")
@@ -265,7 +265,7 @@ def configure_claude_code(dry_run=False):
     ]
 
     if os.path.isfile(settings_file):
-        with open(settings_file) as f:
+        with open(settings_file, encoding="utf-8") as f:
             settings = json.load(f)
     else:
         settings = {}
@@ -288,7 +288,7 @@ def configure_claude_code(dry_run=False):
         return
 
     os.makedirs(settings_dir, exist_ok=True)
-    with open(settings_file, "w") as f:
+    with open(settings_file, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
     for permission in added:

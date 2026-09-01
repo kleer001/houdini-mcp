@@ -19,7 +19,7 @@ SCRIPT_PATH = os.path.join(
 
 def _load_module():
     """Extract pure-Python objects from parse_hips.py via AST."""
-    with open(SCRIPT_PATH) as f:
+    with open(SCRIPT_PATH, encoding="utf-8") as f:
         source = f.read()
 
     tree = ast.parse(source)

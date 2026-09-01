@@ -12,7 +12,7 @@ def _extract_strip_ansi_regex():
     """Extract the ANSI regex pattern from the source via AST."""
     import pathlib
     src = pathlib.Path(__file__).parent.parent / "src" / "houdinimcp" / "claude_terminal.py"
-    source = src.read_text()
+    source = src.read_text(encoding="utf-8")
     # Find the _ANSI_RE pattern string
     match = re.search(r"_ANSI_RE\s*=\s*re\.compile\(r'(.+?)'\)", source)
     assert match, "Could not find _ANSI_RE in claude_terminal.py"
@@ -55,7 +55,7 @@ class TestTerminalConstants:
     def setup_method(self):
         import pathlib
         src = pathlib.Path(__file__).parent.parent / "src" / "houdinimcp" / "claude_terminal.py"
-        self._source = src.read_text()
+        self._source = src.read_text(encoding="utf-8")
 
     def test_classes_defined(self):
         assert "class ClaudeTerminalWidget" in self._source
@@ -73,7 +73,7 @@ class TestTerminalLauncher:
     def setup_method(self):
         import pathlib
         src = pathlib.Path(__file__).parent.parent / "src" / "houdinimcp" / "claude_terminal.py"
-        self._source = src.read_text()
+        self._source = src.read_text(encoding="utf-8")
 
     def test_detect_terminal_function(self):
         assert "def _detect_terminal" in self._source

@@ -29,7 +29,8 @@ def patterns_env(monkeypatch, tmp_path):
     for i, ptype in enumerate(["scene", "subgraph", "recipe"]):
         pid = f"{ptype}_test{i}"
         (patterns_dir / f"{pid}.txt").write_text(
-            f"Pattern: {ptype} test\nSource: test{i}.hip\nCategory: SOP\n\nNodes:\n  box (SOP)"
+            f"Pattern: {ptype} test\nSource: test{i}.hip\nCategory: SOP\n\nNodes:\n  box (SOP)",
+            encoding="utf-8",
         )
 
     # Write index
@@ -38,7 +39,7 @@ def patterns_env(monkeypatch, tmp_path):
         for i, t in enumerate(["scene", "subgraph", "recipe"])
     ]
     index_path = tmp_path / "hip_patterns_index.json"
-    index_path.write_text(json.dumps(index))
+    index_path.write_text(json.dumps(index), encoding="utf-8")
 
     # Monkeypatch the module-level paths
     import annotate_patterns
@@ -65,7 +66,7 @@ class TestListUnannotated:
         patterns_dir, _ = patterns_env
         # Annotate one pattern
         filepath = patterns_dir / "scene_test0.txt"
-        with open(filepath, "a") as f:
+        with open(filepath, "a", encoding="utf-8") as f:
             f.write("\n\n## Annotation\nThis is a test scene.\n")
 
         result = list_unannotated()
@@ -106,7 +107,7 @@ class TestAnnotatePattern:
         assert result["status"] == "ok"
 
         # Verify file was modified
-        content = (patterns_dir / "scene_test0.txt").read_text()
+        content = (patterns_dir / "scene_test0.txt").read_text(encoding="utf-8")
         assert "## Annotation" in content
         assert "A test scene with a box." in content
 

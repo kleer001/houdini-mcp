@@ -227,9 +227,9 @@ class DocumentLoader:
                     content = f.read()
                 title = self.extract_title(content, filepath)
                 cleaned = self.clean_content(content)
-                rel_path = filepath.relative_to(self.docs_dir)
+                rel_path = filepath.relative_to(self.docs_dir).as_posix()
                 documents.append({
-                    'path': str(rel_path),
+                    'path': rel_path,
                     'title': title,
                     'content': cleaned,
                 })
