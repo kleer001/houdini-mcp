@@ -41,12 +41,33 @@ PACKAGE_NAME = "houdinimcp"
 
 
 def find_houdini_prefs(houdini_version=None):
-    """Find the Houdini user preferences directory."""
+    """Find the Houdini user preferences directory.
+
+    Mirrors Houdini's own resolution so the plugin installs where the running
+    Houdini actually reads from:
+      1. $HOUDINI_USER_PREF_DIR, if set, is used verbatim (Houdini's explicit
+         override).
+      2. Else, if $HOME is set, Houdini uses $HOME/houdiniX.Y directly. This
+         matters on Windows: when launched from a shell (Git Bash exports
+         HOME=C:/Users/<u>) Houdini uses $HOME/houdiniX.Y, NOT the Documents
+         folder. Python's expanduser("~") returns USERPROFILE and ignores HOME,
+         so the old logic installed to Documents while Houdini ran from $HOME.
+      3. Else the platform default (Windows: ~/Documents, macOS:
+         ~/Library/Preferences/houdini, Linux: ~).
+    """
     system = platform.system()
+
+    # 1. Explicit override wins — used verbatim.
+    env_pref = os.environ.get("HOUDINI_USER_PREF_DIR")
+    if env_pref:
+        return env_pref
+
     home = os.path.expanduser("~")
+    home_env = os.environ.get("HOME")
 
     if system == "Windows":
-        base = os.path.join(home, "Documents")
+        # Houdini honors $HOME on Windows (uses $HOME/houdiniX.Y, no "Documents").
+        base = home_env if home_env else os.path.join(home, "Documents")
     elif system == "Darwin":
         base = os.path.join(home, "Library", "Preferences", "houdini")
     else:  # Linux
