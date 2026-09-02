@@ -122,15 +122,39 @@ def set_viewport_direction(direction):
 
 
 def capture_screenshot(output_path=None):
-    """Capture a screenshot of the current viewport."""
+    """Capture a screenshot of the current viewport via single-frame flipbook.
+
+    `hou.GeometryViewport.saveAsImage` was removed in Houdini 21; the supported
+    path is a single-frame flipbook through the SceneViewer.
+    """
     import tempfile  # noqa: local import for optional temp path
     viewer = hou.ui.paneTabOfType(hou.paneTabType.SceneViewer)
     if not viewer:
         raise RuntimeError("No scene viewer found")
     if not output_path:
         output_path = os.path.join(tempfile.gettempdir(), "mcp_screenshot.png")
-    viewport = viewer.curViewport()
-    viewport.saveAsImage(output_path)
+    output_path = output_path.replace("\\", "/")
+    frame = int(hou.frame())
+    settings = viewer.flipbookSettings().stash()
+    settings.frameRange((frame, frame))
+    settings.output(output_path)
+    settings.outputToMPlay(False)
+    viewer.flipbook(viewer.curViewport(), settings)
+    # The flipbook writes straight-alpha RGBA; where the viewport background is
+    # transparent the alpha is ~0, so image viewers composite over white and the
+    # screenshot reads blank. Force the saved PNG opaque (keep RGB, drop alpha)
+    # so it's directly viewable. Best-effort — keep the raw capture if Qt is
+    # unavailable or the flatten fails.
+    try:
+        try:
+            from PySide6 import QtGui
+        except ImportError:
+            from PySide2 import QtGui
+        img = QtGui.QImage(output_path)
+        if not img.isNull() and img.hasAlphaChannel():
+            img.convertToFormat(QtGui.QImage.Format_RGB32).save(output_path)
+    except Exception:
+        pass
     return {"filepath": output_path}
 
 
