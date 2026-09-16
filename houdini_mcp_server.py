@@ -328,7 +328,19 @@ IMPORTANT — Houdini MCP Connection Rules:
    listening before trying again.
 
 5. **Verify connectivity first.** Use the `ping` tool before starting work to confirm
-   the Houdini plugin is reachable. If ping fails, tell the user immediately.
+   the Houdini plugin is reachable.
+
+5a. **You can open the Houdini GUI yourself — when the user asks for it.** This server
+   only ever auto-launches *headless* hython; it never starts the GUI. But GUI-only work
+   (viewport, screenshots, flipbooks, and GPU-only paths such as Copernicus/COPs) needs a
+   real GUI session. When the user asks you to open Houdini — or asks for GUI-only work
+   that has no live GUI session — launch it yourself from the shell instead of asking the
+   user to do it: run the `houdini` (or `houdinifx`) binary from the newest install
+   (`$HFS/bin`, else the highest `/opt/hfsNN.N.NNN/bin`), optionally with a `.hip` path,
+   in the background; a display must be present (`$DISPLAY`). The GUI's `pythonrc.py`
+   autostart binds the plugin on port 9876 — poll `ss -ltn | grep :9876` (startup takes
+   ~20–40s), then `ping`. Do NOT open the GUI on your own initiative to tidy up or
+   "get ready" — only when the user asks for it or for work that requires it.
 
 6. **Render workflow:** Render tools save images to disk (in /tmp/ by default) and return
    the file path. Use the Read tool to view the rendered image directly, or tell the user
