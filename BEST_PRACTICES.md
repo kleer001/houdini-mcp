@@ -21,6 +21,7 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
   - [COP HDA: Prototype Parm Expressions Don't Persist](#cop-hda-prototype-parm-expressions-dont-persist)
   - [HScript Menu Parm Conditionals Require Integer Comparisons](#hscript-menu-parm-conditionals-require-integer-comparisons)
   - [HDA OnParmChanged Event Section Does Not Fire](#hda-onparmchanged-event-section-does-not-fire)
+  - [Copernicus Cooks Nothing in Headless hython](#copernicus-cooks-nothing-in-headless-hython)
 - [COP2 (Legacy Compositing)](#cop2-legacy-compositing)
   - [COP2 VEX Filter Custom Shaders](#cop2-vex-filter-custom-shaders)
   - [Copernicus to COP2 Translation](#copernicus-to-cop2-translation)
@@ -41,6 +42,7 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
   - [Node Inspection Caveats](#node-inspection-caveats)
   - [HDA Script Sync](#hda-script-sync)
   - [Diagnostics Workflow](#diagnostics-workflow)
+  - [GUI/Headless Port Handoff](#guiheadless-port-handoff)
 
 ---
 
@@ -613,3 +615,21 @@ When something looks wrong in a COP network, use `execute_houdini_code` to inspe
 4. **Compare pixel values** — `layer.allBufferElements()` + numpy at specific coordinates. Don't trust visual inspection alone.
 5. **Compare layer metadata** — `outputNames()`, `channelCount()`, `attributes()`, `typeInfo()` between working and broken paths.
 6. **Use a switch node for A/B testing** — insert a switch to isolate which part of the chain causes the issue.
+
+### Copernicus Cooks Nothing in Headless hython
+
+**Problem:** Copernicus (`Cop`) networks produce no pixels when the bridge auto-launches a headless `hython` session.
+
+**Symptom:** A `file` COP cooks with no errors, but `node.layerAtFrame(frame)` returns `None`; downstream nodes fail with `source is missing`; `rop_image` render fails with `Failed to cook layers`. No error explains why.
+
+**Cause:** Copernicus is GPU-accelerated. A headless `hython` with no GPU/display context cannot cook COP layers at all.
+
+**Fix:** Run Copernicus work in a GUI (GPU-backed) Houdini session. For headless pixel work, use `numpy`/`PIL` inside `execute_houdini_code` instead of a COP network. Validated: Houdini 21.0.631.
+
+### GUI/Headless Port Handoff
+
+**Problem:** Only one process can listen on the MCP port (9876). A headless session the bridge auto-launched squats the port, so a GUI opened later cannot take over — and only the GUI has a GPU.
+
+**Fix (built in):** A GUI (interactive) session always wins the port. On `start()`, a GUI that finds the port busy writes a short-lived claim file and retries binding; a headless server sees the claim in its poll loop, stops, and frees the port (its `hython` process then exits). The bridge reconnects to the GUI on its next call. When the GUI closes, the bridge re-spawns headless.
+
+**Notes:** `hou.isUIAvailable()` decides who yields. The installer adds `import houdinimcp` to `pythonrc.py` so a GUI auto-starts the server on launch. The bridge honours `HOUDINIMCP_NO_HEADLESS=1` to forbid the headless fallback entirely (GUI-only mode) — leave it unset for automatic juggling. Validated: Houdini 21.0.631.

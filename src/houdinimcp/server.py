@@ -4,6 +4,8 @@ import json
 import socket
 import traceback
 import os
+import time as _time
+import tempfile
 try:
     from PySide6 import QtCore
 except ImportError:
@@ -95,6 +97,59 @@ EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9876))
 
 
+# ---- GUI/headless port handoff ------------------------------------------------
+# Only one process can listen on the port. A GUI (interactive) session always
+# wins: it writes a short-lived claim file, a headless server sees the claim and
+# steps down to free the port, and the GUI then binds. This lets the bridge and
+# an artist share one port without manual juggling.
+_CLAIM_TTL = 15.0  # seconds a port claim stays valid
+
+
+def _claim_path(port):
+    return os.path.join(tempfile.gettempdir(), "houdinimcp_claim_%d" % port)
+
+
+def _write_claim(port):
+    try:
+        with open(_claim_path(port), "w") as f:
+            f.write("%d %f" % (os.getpid(), _time.time()))
+    except Exception:
+        pass
+
+
+def _clear_claim(port):
+    try:
+        os.remove(_claim_path(port))
+    except OSError:
+        pass
+
+
+def _read_claim(port):
+    try:
+        with open(_claim_path(port)) as f:
+            pid_s, ts_s = f.read().split()
+        return int(pid_s), float(ts_s)
+    except Exception:
+        return None
+
+
+def _gui_claim_pending(port):
+    """True if another process has a fresh claim on the port."""
+    c = _read_claim(port)
+    if not c:
+        return False
+    pid, ts = c
+    if pid == os.getpid():
+        return False
+    return (_time.time() - ts) < _CLAIM_TTL
+
+
+def _clean_stale_claim(port):
+    c = _read_claim(port)
+    if c and (_time.time() - c[1]) >= _CLAIM_TTL:
+        _clear_claim(port)
+
+
 class HoudiniMCPServer:
     MUTATING_COMMANDS = {
         "create_node", "modify_node", "delete_node", "execute_code",
@@ -139,24 +194,56 @@ class HoudiniMCPServer:
         self.buffer = b''
         self.timer = None
         self.event_collector = EventCollector()
+        # Interactive sessions win the port; headless sessions yield it.
+        try:
+            self.is_ui = bool(hou.isUIAvailable())
+        except Exception:
+            self.is_ui = False
+
+    def _bind_and_serve(self):
+        """Try to bind the port and start the poll timer. Returns True on success."""
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((self.host, self.port))
+            s.listen(1)
+            s.setblocking(False)
+        except Exception:
+            try:
+                s.close()
+            except Exception:
+                pass
+            return False
+        self.socket = s
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self._process_server)
+        self.timer.start(100)
+        print(f"HoudiniMCP server started on {self.host}:{self.port} "
+              f"({'GUI' if self.is_ui else 'headless'})")
+        self.event_collector.start()
+        return True
 
     def start(self):
-        """Begin listening on the given port; sets up a QTimer to poll for data."""
+        """Begin listening. A GUI session claims the port from a headless one if busy."""
         self.running = True
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            self.socket.bind((self.host, self.port))
-            self.socket.listen(1)
-            self.socket.setblocking(False)
-            self.timer = QtCore.QTimer()
-            self.timer.timeout.connect(self._process_server)
-            self.timer.start(100)
-            print(f"HoudiniMCP server started on {self.host}:{self.port}")
-            self.event_collector.start()
-        except Exception as e:
-            print(f"Failed to start server: {str(e)}")
-            self.stop()
+        _clean_stale_claim(self.port)
+        if self._bind_and_serve():
+            return
+        # Port is busy.
+        if self.is_ui:
+            # Claim the port; a headless holder will step down, then we bind.
+            _write_claim(self.port)
+            for _ in range(20):  # up to ~10s
+                _time.sleep(0.5)
+                if self._bind_and_serve():
+                    _clear_claim(self.port)
+                    print("HoudiniMCP: GUI session took the port from a headless instance.")
+                    return
+            _clear_claim(self.port)
+            print(f"HoudiniMCP: port {self.port} held by another GUI session; not starting.")
+        else:
+            print(f"HoudiniMCP: port {self.port} already in use; headless server not started.")
+        self.running = False
 
     def stop(self):
         """Stop listening; close sockets and timers."""
@@ -176,6 +263,14 @@ class HoudiniMCPServer:
     def _process_server(self):
         """Timer callback to accept connections and process incoming data."""
         if not self.running:
+            return
+        # A headless server yields the port when a GUI session claims it.
+        if not self.is_ui and _gui_claim_pending(self.port):
+            print("HoudiniMCP: GUI session requested the port; headless stepping down.")
+            self.stop()
+            app = QtCore.QCoreApplication.instance()
+            if app is not None:
+                app.quit()  # let the managed hython process exit cleanly
             return
         try:
             if not self.client and self.socket:
