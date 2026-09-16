@@ -195,27 +195,33 @@ def install(prefs_dir, source_dir, dry_run=False):
             f.write("\n")
         print(f"  Created MCP config: {mcp_config_path}")
 
-    # Create/update pythonrc.py so Houdini auto-imports the plugin at startup
+    # Make Houdini auto-import the plugin at startup, from several hooks so a
+    # broken co-plugin cannot suppress it. pythonrc.py runs early, during app
+    # init, so an unhandled exception from another DSO (e.g. a version-mismatched
+    # render engine) aborts that phase and pythonrc never runs. 123.py (empty
+    # launch) and 456.py (scene load) run post-init and survive. Importing from
+    # all three is safe: start_server() is idempotent (guards on hou.session).
     scripts_dir = os.path.join(prefs_dir, "scripts")
-    pythonrc_path = os.path.join(scripts_dir, "pythonrc.py")
     import_line = "import houdinimcp  # Auto-start HoudiniMCP server"
 
-    existing_content = ""
-    if os.path.isfile(pythonrc_path):
-        with open(pythonrc_path) as f:
-            existing_content = f.read()
+    for hook_name in ("pythonrc.py", "123.py", "456.py"):
+        hook_path = os.path.join(scripts_dir, hook_name)
+        existing_content = ""
+        if os.path.isfile(hook_path):
+            with open(hook_path) as f:
+                existing_content = f.read()
 
-    if "import houdinimcp" in existing_content:
-        print(f"  pythonrc.py already imports houdinimcp")
-    elif dry_run:
-        print(f"  APPEND '{import_line}' to {pythonrc_path}")
-    else:
-        os.makedirs(scripts_dir, exist_ok=True)
-        with open(pythonrc_path, "a") as f:
-            if existing_content and not existing_content.endswith("\n"):
-                f.write("\n")
-            f.write(import_line + "\n")
-        print(f"  Added auto-start to {pythonrc_path}")
+        if "import houdinimcp" in existing_content:
+            print(f"  {hook_name} already imports houdinimcp")
+        elif dry_run:
+            print(f"  APPEND '{import_line}' to {hook_path}")
+        else:
+            os.makedirs(scripts_dir, exist_ok=True)
+            with open(hook_path, "a") as f:
+                if existing_content and not existing_content.endswith("\n"):
+                    f.write("\n")
+                f.write(import_line + "\n")
+            print(f"  Added auto-start to {hook_path}")
 
     print("\nDone!" if not dry_run else "\nDry run complete — no files were changed.")
     if not dry_run:

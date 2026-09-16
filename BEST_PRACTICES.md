@@ -43,6 +43,7 @@ Hard-won lessons from real production use of the Houdini MCP. Organized by conte
   - [HDA Script Sync](#hda-script-sync)
   - [Diagnostics Workflow](#diagnostics-workflow)
   - [GUI/Headless Port Handoff](#guiheadless-port-handoff)
+  - [Autostart Survives a Broken Co-Plugin](#autostart-survives-a-broken-co-plugin)
 
 ---
 
@@ -632,4 +633,14 @@ When something looks wrong in a COP network, use `execute_houdini_code` to inspe
 
 **Fix (built in):** A GUI (interactive) session always wins the port. On `start()`, a GUI that finds the port busy writes a short-lived claim file and retries binding; a headless server sees the claim in its poll loop, stops, and frees the port (its `hython` process then exits). The bridge reconnects to the GUI on its next call. When the GUI closes, the bridge re-spawns headless.
 
-**Notes:** `hou.isUIAvailable()` decides who yields. The installer adds `import houdinimcp` to `pythonrc.py` so a GUI auto-starts the server on launch. The bridge honours `HOUDINIMCP_NO_HEADLESS=1` to forbid the headless fallback entirely (GUI-only mode) — leave it unset for automatic juggling. Validated: Houdini 21.0.631.
+**Notes:** `hou.isUIAvailable()` decides who yields. The installer adds `import houdinimcp` to the GUI startup hooks (see [Autostart Survives a Broken Co-Plugin](#autostart-survives-a-broken-co-plugin)) so a GUI auto-starts the server on launch. The bridge honours `HOUDINIMCP_NO_HEADLESS=1` to forbid the headless fallback entirely (GUI-only mode) — leave it unset for automatic juggling. Validated: Houdini 21.0.631.
+
+### Autostart Survives a Broken Co-Plugin
+
+**Problem:** The GUI plugin does not start and nothing listens on port 9876, even though Houdini opens normally.
+
+**Symptom:** No `HoudiniMCP server started …` line in Houdini's console, and no Python traceback either — the autostart simply never ran. Often paired with an unrelated plugin failing loudly at launch (e.g. `Traceback from Unhandled Exception Loading … redshift4houdini.so`, a version-mismatched render engine).
+
+**Cause:** `pythonrc.py` runs *early*, during `initApplication` (operator-table build). An unhandled exception from another DSO loaded in that phase aborts the whole startup-script step, so `pythonrc.py` never executes. The main window still comes up because per-DSO load errors are caught individually.
+
+**Fix (built in):** Attach the autostart from hooks that run *after* init and survive the abort. The installer adds `import houdinimcp` to `123.py` (empty launch) and `456.py` (scene load) as well as `pythonrc.py` (fast path). `start_server()` is idempotent — it guards on `hou.session.houdinimcp_server` — so importing from several hooks starts the server at most once. Proven with a trace: with a broken Redshift plugin, `pythonrc.py` did not run but `456.py` did, and the server bound from `456.py`. Validated: Houdini 21.0.631.
