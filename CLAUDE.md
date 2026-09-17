@@ -152,7 +152,9 @@ See **[CLAUDE_GENERIC.md](CLAUDE_GENERIC.md)** — reusable coding guidelines (t
 
 ## Contributing to Best Practices
 
-When you discover a **non-trivial** Houdini behavior while working through this MCP — silent failures, undocumented API quirks, metadata requirements, required parameter ordering, etc. — add it to [`BEST_PRACTICES.md`](BEST_PRACTICES.md).
+Best practices are **two layers**: [`BEST_PRACTICES.md`](BEST_PRACTICES.md) is the always-read entry — the "build nodes, not code" authoring philosophy, the cross-cutting LLM pitfalls (A–H), and a routing table — and [`best_practices/<area>.md`](best_practices/) holds the involved, context-specific gotchas (`dops`, `cops`, `cop2`, `sops`, `lops_usd`, `rops_render`, `karma`, `mcp_and_environment`, plus `hda`/`pdg`/`chops` stubs).
+
+When you discover a **non-trivial** Houdini behavior while working through this MCP — silent failures, undocumented API quirks, metadata requirements, required parameter ordering, etc. — record it.
 
 **What qualifies as non-trivial:**
 - Behavior that has no error message (silent failure)
@@ -160,13 +162,15 @@ When you discover a **non-trivial** Houdini behavior while working through this 
 - Workarounds for missing Houdini features (e.g., no timeshift in Copernicus)
 - Anything that took multiple attempts to diagnose
 
+**Where it goes (the placement gate):**
+- **Generalizable + usable on a first pass + condenses to ~100–200 tokens → `BEST_PRACTICES.md` (Layer 1).** A one-line echo here is worth keeping even when the detail lives in an area file — repetition primes the next agent.
+- **Involved or narrow to one context → strictly `best_practices/<area>.md` (Layer 2).** Create the area file if it doesn't exist; add a one-line pointer from Layer 1 only if it also passes the gate above.
+
 **How to add it:**
-1. **Read `BEST_PRACTICES.md` first** — check that the item isn't already covered
-2. Place it under the appropriate context section (COPs, SOPs, LOPs, TOPs, etc.)
-3. Create the section if it doesn't exist yet
-4. Add an entry to the Index at the top of the file
-5. **Include the Houdini version** (e.g., `> Houdini 21.0.631`) — behaviors change between releases
-6. **Use anti-pattern format** when applicable: "Tried X, it silently failed, do Y instead"
-7. Be brief: problem, symptom, fix. A few sentences, not paragraphs. Code snippets only when the syntax is the non-obvious part
+1. **Read the target file first** — check the item isn't already covered
+2. Place it in the area file that matches the context; create it if missing
+3. **Include the Houdini version** (e.g., `> Houdini 21.0.631`) — behaviors change between releases
+4. **Use anti-pattern format** when applicable: "Tried X, it silently failed, do Y instead"
+5. Be brief: problem, symptom, fix. A few sentences, not paragraphs. Code snippets only when the syntax is the non-obvious part
 
 Do **not** add trivial items (standard API usage, well-documented behavior, one-off bugs).

@@ -1,687 +1,78 @@
 # Houdini MCP — Best Practices
 
-Hard-won lessons from real production use of the Houdini MCP. Organized by context so you can jump to what's relevant.
+Hard-won lessons from real production use of the Houdini MCP. This file is the **always-read entry layer**: the authoring philosophy, the cross-cutting workflow pitfalls, and a routing table to the per-area deep-dives under [`best_practices/`](best_practices/).
 
-**Contributing:** Keep entries brief — problem, symptom, fix. Check this file before adding to avoid duplicates. Every entry must include the Houdini version it was validated against. Use the anti-pattern format when applicable: "Tried X, it silently failed, do Y instead."
+## How this is organized (two layers)
 
-## Index
+- **Layer 1 — this file.** General philosophy plus short, first-pass, broadly-applicable rules. Read it every session.
+- **Layer 2 — [`best_practices/<area>.md`](best_practices/).** Involved, context-specific gotchas. Load only the file that matches what you're working in (DOPs, COPs, Karma, …) so you don't carry 600 lines of unrelated arcana.
 
-- [Copernicus COPs (Compositing)](#copernicus-cops-compositing)
-  - [Layer Naming](#layer-naming)
-  - [ImageLayer Creation](#imagelayer-creation)
-  - [Python Snippet COP](#python-snippet-cop)
-  - [Temporal Access (Time-Shifting)](#temporal-access-time-shifting)
-  - [Node Categories](#node-categories)
-  - [COP HDA Output Naming](#cop-hda-output-naming)
-  - [Resolution Mismatch at Sequence Boundaries](#resolution-mismatch-at-sequence-boundaries)
-  - [HDA matchCurrentDefinition Resets Internals](#hda-matchcurrentdefinition-resets-internals)
-  - [COP VEX Wrangle: volumesamplep Is Input-0-Only](#cop-vex-wrangle-volumesamplep-is-input-0-only)
-  - [COP VEX Wrangle: Coordinate System Is Image Space](#cop-vex-wrangle-coordinate-system-is-image-space)
-  - [COP HDA Callbacks Cannot Modify Internal Node Parms](#cop-hda-callbacks-cannot-modify-internal-node-parms)
-  - [COP HDA: Prototype Parm Expressions Don't Persist](#cop-hda-prototype-parm-expressions-dont-persist)
-  - [HScript Menu Parm Conditionals Require Integer Comparisons](#hscript-menu-parm-conditionals-require-integer-comparisons)
-  - [HDA OnParmChanged Event Section Does Not Fire](#hda-onparmchanged-event-section-does-not-fire)
-  - [Copernicus Cooks Nothing in Headless hython](#copernicus-cooks-nothing-in-headless-hython)
-- [COP2 (Legacy Compositing)](#cop2-legacy-compositing)
-  - [COP2 VEX Filter Custom Shaders](#cop2-vex-filter-custom-shaders)
-  - [Copernicus to COP2 Translation](#copernicus-to-cop2-translation)
-  - [COP2 File Node Frame Range](#cop2-file-node-frame-range)
-- [Merge / Blend Mode Math Reference](#merge--blend-mode-math-reference)
-- [LOPs / USD](#lops--usd)
-  - [Standalone husk: Let Karma Author RenderVars, Don't DIY](#standalone-husk-let-karma-author-rendervars-dont-diy)
-  - [Standalone husk: productName Time-Sampled vs Default](#standalone-husk-productname-time-sampled-vs-default)
-  - [Standalone husk: VEX Shaders Need opdef: URIs](#standalone-husk-vex-shaders-need-opdef-uris)
-  - [editmaterialproperties: parm.unexpandedString() Aborts Mid-Node on Non-String Spare Parms](#editmaterialproperties-parmunexpandedstring-aborts-mid-node-on-non-string-spare-parms)
-- [SOPs / File Cache](#sops--file-cache)
-  - [parm.set() Silently Ignored When Expression Active](#parmset-silently-ignored-when-expression-active)
-  - [hbatch render Only Works with ROPs, Not SOPs](#hbatch-render-only-works-with-rops-not-sops)
-- [HScript / Run Script](#hscript--run-script)
-  - [File > Run Script Only Accepts .cmd, Not .py](#file--run-script-only-accepts-cmd-not-py)
-- [General MCP Usage](#general-mcp-usage)
-  - [Connection Discipline](#connection-discipline)
-  - [Node Inspection Caveats](#node-inspection-caveats)
-  - [HDA Script Sync](#hda-script-sync)
-  - [Diagnostics Workflow](#diagnostics-workflow)
-  - [GUI/Headless Port Handoff](#guiheadless-port-handoff)
-  - [Autostart Survives a Broken Co-Plugin](#autostart-survives-a-broken-co-plugin)
-  - [License Server Repointed by Installer Upgrade](#license-server-repointed-by-installer-upgrade)
-  - [Unlicensed Houdini Error-Loop Fills the tmpfs Log](#unlicensed-houdini-error-loop-fills-the-tmpfs-log)
+**Contributing:** A finding that condenses to a first-pass, generalizable rule (roughly ≤100–200 tokens) lives **here**. Repetition across layers is deliberate — a one-line echo in Layer 1 keeps the next agent primed even when the detail sits in an area file. Anything more involved, or narrow to one context, goes **strictly** into its area file. Every entry names the Houdini version it was validated against. Prefer the anti-pattern format: "Tried X, it silently failed, do Y instead."
 
 ---
 
-## Copernicus COPs (Compositing)
+## Authoring philosophy: build nodes, not code
 
-### Layer Naming
+**Hard rule: the deliverable is a node network a TD can open and edit — not procedural code that does the work.** When you drive Houdini through this MCP, the Python you send is *scaffolding to build the graph*. The graph's logic must live in nodes.
 
-> Houdini 21.0.631
+- **Motion and behavior come from real solver / force nodes** — POP Force (gravity), POP Wind (noise), POP Drag, and the DOP/SOP solvers — **not** from `@v += …` or position math in a wrangle. Let the solver integrate.
+- **Wrangles are for attributes and selection** — ids, groups, release times, colors — **not** for integrating motion.
+- **Do not build a control null of promoted parameters up front.** Use each node's own parameters with sensible defaults. Add a `CONTROLS` null with `ch()` references **only when the user asks** for it.
 
-**The Layer Merge (average) node matches inputs by layer name, not by input index.** Mismatched names are **silently ignored** — no error, no warning, just missing pixels.
+**Exceptions — when code is the honest tool:** creating or deriving attributes; grouping and selection; genuinely kinematic looks with no force-node equivalent (e.g. confetti flutter); and real math or programming. Do those in a wrangle and *say so* — don't dress procedural motion up as a simulation, and don't force a node graph where code is clearer.
 
-**Anti-pattern:** Created a Python Snippet COP with output named `"C"` feeding into a Layer Merge alongside a `"mono"` input. Merge output contained only the mono input. Zero contribution from the other layer, zero errors.
-
-**Diagnosis:** Check `node.outputNames()` on each input to the merge.
-
-**Fix:** Set your node's `output1_name` parm to match the upstream layer name. The `return` dict key must also match: `return {'mono': out_layer}`.
-
-### ImageLayer Creation
-
-> Houdini 21.0.631
-
-When creating a new `hou.ImageLayer()` from scratch (e.g., in a Python Snippet COP), three things will break downstream nodes:
-
-#### 1. Construction order matters
-
-**Anti-pattern:** Set `setDataWindow()` before `setChannelCount()` / `setStorageType()`. Result: `"Provided buffer incorrect size"` on `setAllBufferElements()`.
-
-Buffer size is calculated from resolution + channels + storage at the time the window is set. Set channel count and storage type **first**.
-
-```python
-out_layer = hou.ImageLayer()
-out_layer.setChannelCount(1)                            # FIRST
-out_layer.setStorageType(hou.imageLayerStorageType.Float32)  # FIRST
-out_layer.setDataWindow(0, 0, width, height)            # THEN
-out_layer.setDisplayWindow(0, 0, width, height)
-out_layer.setAllBufferElements(result.tobytes())
-```
-
-#### 2. `setDataWindow` / `setDisplayWindow` take 4 separate args, not a list
-
-**Anti-pattern:** Called `setDataWindow([0, 0, 1920, 1080])`. Fails with `"missing 3 required positional arguments"`.
-
-**Fix:** `setDataWindow(0, 0, 1920, 1080)` — four separate ints.
-
-#### 3. Copy all metadata from the source layer
-
-**Anti-pattern:** Returned a new `hou.ImageLayer()` with correct pixel data but no attributes. Downstream Layer Merge **silently discarded** the entire layer.
-
-A bare `hou.ImageLayer()` has zero attributes. Always copy metadata:
-
-```python
-out_layer.setBorder(input_layer.border())
-out_layer.setPixelScale(input_layer.pixelScale())
-out_layer.setTypeInfo(input_layer.typeInfo())
-out_layer.setProjection(input_layer.projection())
-out_layer.setAttributes(input_layer.attributes())
-```
-
-### Python Snippet COP
-
-> Houdini 21.0.631
-
-#### `kwargs` contains ImageLayer objects, not numpy arrays
-
-Extract pixel data with:
-
-```python
-data = layer.allBufferElements(hou.imageLayerStorageType.Float32, channels)
-arr = np.frombuffer(data, dtype=np.float32).reshape(height, width).copy()
-```
-
-The `.copy()` is required — the original buffer is read-only.
-
-#### Input layers are GPU-resident and NOT frozen
-
-**Anti-pattern:** Tried `setAllBufferElements()`, `makeConstant()`, and `freeze()` on `kwargs` input layers. All fail — they're GPU-resident with `isFrozen=False`.
-
-**Fix:** Always create a new `hou.ImageLayer()` for output. Never modify the input in-place.
-
-#### `hou` module IS accessible
-
-Despite the docs stating "this node can't access the currently evaluating node", `import hou` works. You can call `hou.pwd()`, `hou.frame()`, `hou.node()`, and critically `node.layerAtFrame(frame)` for temporal effects. See [Temporal Access](#temporal-access-time-shifting).
-
-### Temporal Access (Time-Shifting)
-
-> Houdini 21.0.631
-
-**Copernicus has no native timeshift COP.** The old COP2 `shift` node does not exist in Copernicus networks.
-
-**Anti-patterns tried:**
-- `op:` syntax in the File COP to reference another COP's output → `"Unable to read file"`
-- Searching for `shift`, `timefilter`, `timeshift` in the Cop category → none exist
-- File COP `videoframemethod` / `videoframe` with expressions → only works for on-disk sequences, not upstream COP outputs
-
-**Workaround:** `node.layerAtFrame(float)` from Python (via `execute_houdini_code` or inside a Python Snippet COP). Cooks the target node at any frame and returns an `ImageLayer`.
-
-```python
-source = hou.pwd().inputs()[0]
-layer_past = source.layerAtFrame(hou.frame() - 5)
-layer_future = source.layerAtFrame(hou.frame() + 5)
-```
-
-**Performance:** Each call triggers a full upstream cook at that frame. 10 echo offsets = 10 extra cooks per frame.
-
-### Node Categories
-
-> Houdini 21.0.631
-
-**Copernicus node category is `"Cop"`, not `"Cop2"`.** Use `node.childTypeCategory()` to query. Old COP2 nodes (`shift`, `timefilter`, `vopcop2filter`, etc.) are not available in Copernicus networks.
-
-```python
-parent = hou.node("/path/to/copnet")
-for name in sorted(parent.childTypeCategory().nodeTypes().keys()):
-    print(name)
-```
-
-### COP HDA Output Naming
-
-> Houdini 21.0.631
-
-**For COP HDAs, `outputNames()` is controlled by the `output` line in the DialogScript section of the HDA definition — NOT by the `outputname#` multiparm parm.**
-
-**Anti-pattern:** Created a COP HDA with `outputname1` multiparm (matching the null node pattern) and set it to `"mono"`. `outputNames()` still returned `('output1',)` — the default connector name from the DialogScript. Downstream Layer Merge silently ignored the HDA's output.
-
-**Diagnosis:** Read the HDA's DialogScript section: `hda_def.sections()['DialogScript'].contents()`. Look for the `output` line (format: `output <connector_name> <label>`).
-
-**Fix:** Modify the DialogScript's `output` line to set the desired layer name:
-
-```python
-hda_def = node.type().definition()
-ds = hda_def.sections()['DialogScript'].contents()
-ds = ds.replace('output\toutput1\tC', 'output\tlayer\tlayer')
-hda_def.sections()['DialogScript'].setContents(ds)
-node.matchCurrentDefinition()
-```
-
-**Note:** The `outputname#` multiparm on a COP HDA has no effect on `outputNames()`. It works on built-in nodes like `null` because their output naming is handled in C++, not via DialogScript.
-
-### Resolution Mismatch at Sequence Boundaries
-
-> Houdini 21.0.631
-
-**`layerAtFrame()` returns a default 1024×1024 layer for frames outside the source sequence range.** No error — just wrong resolution.
-
-**Anti-pattern:** Echo effect called `layerAtFrame(frame - 5)` near the start of a sequence (frame 1001). Frames before 1001 returned 1024×1024 instead of the expected 1920×1080. `np.maximum()` then failed or produced garbage due to shape mismatch.
-
-**Fix:** Guard against resolution mismatch before blending:
-
-```python
-echo_layer = source.layerAtFrame(echo_frame)
-if echo_layer.bufferResolution() != (width, height):
-    continue
-```
-
-### HDA `matchCurrentDefinition` Resets Internals
-
-> Houdini 21.0.631
-
-**Calling `node.matchCurrentDefinition()` on an unlocked HDA reverts ALL internal edits** — manually created nodes, rewired connections, and parm changes inside the HDA are lost.
-
-**Anti-pattern:** Unlocked an HDA with `allowEditingOfContents()`, created a null node inside, wired it into the chain, then called `matchCurrentDefinition()` to refresh the outer node. The null node disappeared and the internal chain reverted to the saved definition.
-
-**Fix:** Make all changes to the HDA definition (DialogScript, parm template, etc.) BEFORE calling `matchCurrentDefinition()`. Or save the definition (`hda_def.save()`) after internal edits and before refreshing.
-
-### COP VEX Wrangle: `volumesamplep` Is Input-0-Only
-
-> Houdini 21.0
-
-**`volumesamplep(input, "layer", pos)` silently returns `{0,0,0}` for any `input` other than `0`.** There is no error, no warning, and no cook failure — just black pixels.
-
-**Anti-pattern:** Wrangle with source at input 0 (resample) and original image at input 1. Used `volumesamplep(1, "C", tiled_pos)` to sample the original at a custom UV. Always returned zero.
-
-**Fix:** Only input 0 is accessible for custom-position sampling via `volumesamplep`. If you need to sample a different COP input at arbitrary positions, restructure so that input is connected at slot 0. For tiling specifically: force the resample to STRETCH fit mode so its image space is identical to the source's, then sample `volumesamplep(0, "C", tiled_pos)` on the resample — it gives the same result as sampling the source directly.
-
-**Note:** `volumeres(input, "layer")` has the same limitation — returns 0 for non-zero input indices and for layer names that don't exist on the input. Read source dimensions from HDA hidden parms set by Python callbacks instead.
-
-### COP VEX Wrangle: Coordinate System Is Image Space
-
-> Houdini 21.0
-
-**In a COP wrangle, `@P` is in image space — `(-1, -1)` at top-left to `(+1, +1)` at bottom-right — not pixel indices.** `volumesamplep` expects image-space coordinates.
-
-**Verified:** At pixel `(0, 0)` of a 1024-wide image, `@P.x ≈ -0.999`. At pixel `(1023, 0)`, `@P.x ≈ +0.999`.
-
-**Coordinate conversion from tile UV (0..1) to image space:**
-
-```c
-// Naïve — lands on cell boundaries at u=0.25, 0.5 etc.; bilinear bleed produces 0.5 gray
-float ip_x = 2.0f * u - 1.0f;
-
-// Correct — shifts to voxel center; avoids boundary interpolation
-float ip_x = 2.0f * u - 1.0f + 1.0f / src_w;
-```
-
-The `+ 1/src_w` half-pixel shift matters whenever your UV lands near a voxel boundary (e.g. at checkerboard cell edges). Without it, bilinear interpolation between a white and a black cell produces 0.5.
-
-**Pixel reads from Python:** Use `layer.bufferIndex(x, y)` to read individual pixels — not `.pixel()` (doesn't exist on `hou.ImageLayer`). `bufferIndexV4(x, y)` returns all four channels.
-
-### COP HDA Callbacks Cannot Modify Internal Node Parms
-
-> Houdini 21.0
-
-**Python callbacks (`OnCreated`, `OnParmChanged`, `OnInputChanged`) raise `hou.PermissionError: locked assets` if they attempt to call `parm.set()` on any node inside the HDA's locked subnet.**
-
-**Anti-pattern:** `onParmChanged` computed a fit mode integer and called `resample.parm("stretch").set(computed_value)` on the internal resample node. Raised `PermissionError` at cook time.
-
-**Fix:** Callbacks may only modify the HDA's **own** parameters. Drive internal node parms exclusively via HScript channel-reference expressions baked in at build time:
-
-```python
-# At HDA build time — expressions are locked in permanently:
-rs.parm("stretch").setExpression('ch("../fit_mode")', language=hou.exprLanguage.Hscript)
-
-# In OnParmChanged — only touch the HDA's own parms:
-def onParmChanged(kwargs):
-    node = kwargs["node"]
-    node.parm("_computed_res_w").set(...)   # HDA's own hidden parm — OK
-    # node.parm("internal_rs_parm").set()  # PermissionError — never do this
-```
-
-### COP HDA: Prototype Parm Expressions Don't Persist
-
-> Houdini 21.0
-
-**`parm.setExpression()` called on the prototype/build instance of an HDA is an instance-level override. It is NOT saved into the HDA type definition.** New instances created from the saved HDA get the default value (e.g. `0`), never the expression.
-
-**Anti-pattern:** After `hda_def.setParmTemplateGroup(ptg)` and before `hda_def.save()`, called `hda_node.parm("tile_mode_int").setExpression('ch("tile_mode")')`. The build instance had the expression. Every new instance of the HDA evaluated `tile_mode_int` as `0`.
-
-**Symptom:** A hidden integer mirror parm always reads its default value regardless of what the source menu parm is set to.
-
-**Fix:** Maintain integer-mirror parms via Python callbacks, not expressions:
-
-```python
-# In onCreated AND _update():
-node.parm("tile_mode_int").set(node.parm("tile_mode").eval())
-```
-
-**Also note:** In headless hython, `parm.set()` does **not** fire `OnParmChanged` event handlers. When testing, call your update function manually: `node.hdaModule()._update(node)`.
-
-### HScript Menu Parm Conditionals Require Integer Comparisons
-
-> Houdini 21.0
-
-**Using `chs("parm") == "token"` in an HScript expression causes a "Bad data type for function or operation" cook error.** No visual feedback during build — the error only surfaces when the node cooks.
-
-**Anti-pattern:**
-
-```python
-# Breaks at cook time:
-FILTER_EXPR = 'if(chs("../filter_mode")=="auto", 4, if(chs(...)==..., ...))'
-```
-
-**Fix:** Menu parms (`MenuParmTemplate`) store integer indices. Use `ch("parm")` (not `chs`) and compare against the zero-based index:
-
-```python
-# Works — compare index integers, not token strings:
-FILTER_EXPR = (
-    'if(ch("../filter_mode")==0, 4, '   # auto → catmull-rom
-    'if(ch("../filter_mode")==1, 0, '   # point
-    # ...
-    '1))'
-)
-```
-
-The token strings shown in the UI (`"auto"`, `"point"`) are only accessible via `chs()`, but `chs()` comparisons in `if()` expressions do not work. Always use the integer index from `ch()`.
-
-### HDA OnParmChanged Event Section Does Not Fire
-
-> Houdini 21.0
-
-**Adding an `OnParmChanged` section to an HDA definition has no effect — Houdini does not fire it when parameters change.** The section is stored silently and never called. `OnCreated` and `OnInputChanged` are the only reliably fired interactive HDA events.
-
-**Anti-pattern:**
-
-```python
-hda_def.addSection("OnParmChanged", "kwargs['node'].hdaModule().onParmChanged(kwargs)")
-hda_def.setExtraFileOption("OnParmChanged/IsPython", True)
-# Never fires — parameters changing in the UI do nothing.
-```
-
-**Fix:** Set `script_callback` on each `ParmTemplate` that needs to trigger Python when changed. This fires on interactive edits and is stored in the HDA type definition, so it persists to every new instance without per-instance setup:
-
-```python
-def _cb(pt):
-    pt.setScriptCallback("kwargs['node'].hdaModule().onParmChanged(kwargs)")
-    pt.setScriptCallbackLanguage(hou.scriptLanguage.Python)
-    return pt
-
-width_pt = hou.IntParmTemplate("width", "Width", 1)
-_cb(width_pt)
-```
-
-`kwargs['node']` is the node, `kwargs['parm_name']` is the changed parameter name, `kwargs['script_value']` is the new value.
+**Worked example.** To make confetti fall, do **not** write `@v += {0,-9.8,0} * @TimeInc` in a POP wrangle. Build the real chain —
+`POP Source → POP Force (gravity) → POP Wind (large-feature noise) → POP Drag → POP Solver` —
+gate the forces to a "released" point group, and let the solver integrate. Wrangles set only the release time, the group membership, and the color. Rotation you can't get from a force node (flutter) is the allowed kinematic exception: drive `@w` in a wrangle and note it.
 
 ---
 
-## COP2 (Legacy Compositing)
+## Workflow pitfalls (they will bite an LLM)
 
-### COP2 VEX Filter Custom Shaders
+Each rule is general; the fiddly, context-specific instances live in the area files.
 
+- **A — Don't guess node types or parm names; inspect first.** They are rarely what you'd assume (`popnet` is actually `dopnet`; a `uvtexture` SOP may not exist; a bind menu entry labelled "vector" can be *vector2* and silently drop a channel). List types (`list_node_types`), read the parm template and its menu labels, *then* set.
+- **B — Verify results; operations silently no-op.** `removepoint` can delete nothing, a group/blast can select the wrong set, and a dangling solver chain can cook with **zero errors**. After each build step check the thing you expected — count points, read the attribute — don't trust that it worked.
+- **C — VEX type-prefixes and ambiguous signatures fail quietly or hard.** There is no `w@` prefix (`@w` is a vector → use `v@w`); `colormap(...).r` and `(int)prim(...)` are ambiguous and abort the compile. After setting any wrangle, run `find_error_nodes`.
+- **D — Sim discipline.** DOP sims cook **sequentially from the start frame**, need a **resimulate** after parm edits, and a full-point Python read loop **times out the bridge** — sample points or read via a wrangle. *(details: [`best_practices/dops.md`](best_practices/dops.md))*
+- **E — Respect the co-edited scene.** The `.hip` is shared with the user; they rename and rewire nodes between your calls. **Inspect the current wiring before you restructure**, and never destroy a node you didn't create. *(details: [`best_practices/mcp_and_environment.md`](best_practices/mcp_and_environment.md))*
+- **F — Renders are async; poll, don't judge early.** `start_render` / `rop.render()` return before the image is written, and a 0-byte file is mid-write, not a failure. Poll the output path and the render process (`monitor_render`). *(details: [`best_practices/rops_render.md`](best_practices/rops_render.md))*
+- **G — Trace attributes end-to-end to the render.** An attribute in the sim (e.g. `@orient`) is only "working" once you confirm it survives copy-to-points and reaches the material. Watch for reversed normals (a −Z card faces away from the camera → renders dark). Verify the whole chain, not just the source.
+- **H — Build incrementally, not one mega-blob.** One bad node type aborts an entire `execute_houdini_code` build and leaves partial state. Stage the build and verify each stage; prefer `batch` (atomic undo group) for bulk node creation.
+
+---
+
+## Cross-cutting rules that stay in Layer 1
+
+### Connection discipline
 > Houdini 21.0.631
 
-**The `vexfilter` node cannot find custom `.vex` shaders by short name from user directories.** It only resolves short names from the system `$HH/vex/Cop2/` directory.
+**The MCP plugin uses a single-threaded TCP listener.** Ping before starting work. Never rapid-fire commands. On a connection error, **stop** — don't retry in a loop; the plugin likely needs a restart. Use `batch` for bulk operations (atomic single undo group).
 
-**Anti-pattern:** Compiled a `.vfl` to `~/houdini21.0/vex/Cop2/softlight.vex` (which IS on `HOUDINI_PATH`), set `function` parm to `"softlight"`. Error: `"Could not find VEX Cop2 shader 'softlight'"`.
-
-**Fix:** Use the full absolute path without extension:
-
-```python
-node.parm("function").set("/home/user/houdini21.0/vex/Cop2/softlight")
-```
-
-**VFL compilation:** `vcc myfilter.vfl` from the target directory. The `cop2` context is declared in the file itself — no `-d` flag needed (that flag means "compile all functions", not "set context").
-
-### Copernicus to COP2 Translation
-
+### Node inspection can crash
 > Houdini 21.0.631
 
-**Copernicus (`copnet`, child category `Cop`) and COP2 (`cop2net`, child category `Cop2`) are different systems.** Node types don't cross between them.
+`get_node_info` can raise (e.g. `'Color' object is not iterable`) on nodes with non-standard color configs. Fall back to `execute_houdini_code` and iterate `node.parms() / inputs() / outputs()` directly.
 
-Key type mappings:
+### Diagnostics: inspect, don't eyeball
+> Houdini 21.0.631
 
-| Copernicus | COP2 | Notes |
+When something looks wrong: iterate `children()` printing each node's inputs/outputs; check `node.errors()` and `node.warnings()`; compare the actual data (attribute values, point counts, layer names) between a working and a broken path; A/B with a switch node. Never trust visual inspection alone. *(COP-specific version: [`best_practices/cops.md`](best_practices/cops.md))*
+
+---
+
+## Area files (Layer 2)
+
+| Area | File | Covers |
 |---|---|---|
-| `blend` (mode=over) | `over` | Input order swapped: COP2 `over` is FG=in0, BG=in1 (Copernicus blend is A/BG=in0, B/FG=in1) |
-| `blend` (mode=max) | `max` | `mask` parm → `effectamount` parm |
-| `xform2d` | `xform` | Same parm names (tx, ty, etc.) |
-| `constant` | `color` | `f4r/f4g/f4b` → `colorr/colorg/colorb`; COP2 `color` is a generator (set resolution explicitly) |
-| `resample` | `scale` | COP2 `scale` uses explicit resolution, not a reference input |
-| `rop_image` | `rop_comp` | `filename` → `filename1`; frame range parms differ |
-| `channelswap` | `channelcopy` | No direct equivalent; consider skipping if `mono` is downstream |
-| `file`, `null`, `mono`, `invert`, `gamma`, `layer` | same name | Parm names may differ (e.g. COP2 file uses `filename1`) |
-
-### COP2 File Node Frame Range
-
-> Houdini 21.0.631
-
-**COP2 `file` node shows a grey dotted X when the current frame is outside the node's `start`/`length` range.** No error — just a blank frame with a grey X overlay.
-
-**Anti-pattern:** File node with expression-based frame offset (e.g. `` `padzero(4,$F-1001)` ``) mapping frames 1002–1265 to files frame_0001.png–frame_0264.png. Default `start=1` and `length=264` meant valid range was frames 1–264, but timeline was at frame 1016.
-
-**Fix:** Set `start` to match the first Houdini frame where a file exists (1002 in this case). The `length` stays at the file count (264).
-
----
-
-## Merge / Blend Mode Math Reference
-
-Comprehensive reference for compositing blend modes. Useful when implementing custom VEX filters.
-
-Source: [Nuke Merge Operations](https://learn.foundry.com/nuke/9.0/content/comp_environment/merging/merge_operations.html)
-
-Where **A = foreground**, **B = background**, **a/b = respective alpha**:
-
-| Mode | Formula |
-|---|---|
-| Over | `A + B(1-a)` |
-| Under | `A(1-b) + B` |
-| Plus / Add | `A + B` |
-| Multiply | `AB` |
-| Screen | `A + B - AB` |
-| Max / Lighten | `max(A, B)` |
-| Min / Darken | `min(A, B)` |
-| Soft Light | If `AB < 1`: `B(2A + B(1 - AB))`, else: `2AB` |
-| Hard Light | If `A < 0.5`: `2AB`, else: `1 - 2(1-A)(1-B)` |
-| Overlay | Hard Light with inputs swapped |
-| Color Dodge | `B / (1-A)` |
-| Color Burn | `1 - (1-B)/A` |
-| Difference | `|A - B|` |
-| Exclusion | `A + B - 2AB` |
-
----
-
-## LOPs / USD
-
-### Standalone husk: Let Karma Author RenderVars, Don't DIY
-
-> Houdini 21.0.631
-
-**Symptom:** Manually authored RenderVars produce `Unsupported AOV settings for: C` or black renders. No orderedVars produces `No orderedVars to specify channels`.
-
-**Cause:** Karma in-process and standalone husk validate RenderVar attributes differently (SideFX BUG #134678). Copying the exact values from `karmarendersettings` LOP output (`color4f` + LPE + `color4h`) fails in standalone husk. Manually authoring simpler values (`color3f`/`raw`/`C`) also fails. There is no known manually-authored RenderVar configuration that reliably works across husk versions.
-
-**Anti-patterns tried:**
-- `color4f` + `sourceName=C.*[LO]` + `sourceType=lpe` → "Unsupported AOV settings"
-- `color3f` + `sourceName=C` + `sourceType=raw` + husk attrs → "Unsupported AOV settings"
-- `color3f` + `sourceName=Ci` + `sourceType=raw` (no husk attrs) → warning + black render
-
-**Fix:** Don't author RenderVars yourself. Enable the **Beauty AOV** checkbox on the Karma RenderSettings LOP in the scene. The LOP authors RenderVars through an internal code path that husk accepts. Detect missing orderedVars during auditing and warn the user to enable Beauty.
-
-### Standalone husk: productName Time-Sampled vs Default
-
-> Houdini 21.0.631
-
-**Symptom:** husk writes to a stale path like `/old/path/$HIPNAME.$OS.$F4.exr` instead of the productName you authored.
-
-**Cause:** Karma RenderSettings LOP evaluates `$HIP/render/$HIPNAME.$OS.$F4.exr` at cook time, baking it as a **time-sampled** value on `productName`. After `stage.Flatten()`, setting `attr_spec.default = new_path` is ignored — time-sampled values always win over defaults in USD composition.
-
-**Fix:** Clear time-sampled values before setting the default:
-
-```python
-attr = prim.GetAttribute("productName")
-if attr and attr.GetTimeSamples():
-    attr.Clear()
-attr_spec = Sdf.AttributeSpec(prim_spec, "productName", Sdf.ValueTypeNames.Token)
-attr_spec.default = new_path
-```
-
-**Diagnostic:** `attr.GetTimeSamples()` returns non-empty if time samples exist.
-
-### Standalone husk: VEX Shaders Need opdef: URIs
-
-> Houdini 21.0.631
-
-**Symptom:** `Unhandled node type <name> in material`. Objects render default grey.
-
-**Cause:** VEX shader resolution in husk works ONLY through `opdef:` URI resolution (e.g. `opdef:/Vop/principledshader::2.0?SurfaceVexCode`), which triggers on-demand VEX compilation via `VEX_VexResolver`. There is **no Sdr parser plugin for VEX/VFL** — the Sdr registry only handles `kma`, `mtlx`, `glslfx`, and `USD` source types. Baking opdef: references to VFL files on disk does nothing — husk cannot use them.
-
-**Anti-patterns tried:**
-- Baking VFL source to a file inside USDZ → husk can't read files from zip archives
-- Extracting VFL to disk and overriding sourceAsset → no Sdr parser for VFL files
-- Baking to disk with various file extensions → irrelevant, no parser exists
-
-**Fix:** Preserve `opdef:` URIs for VEX shaders. If you must bake `opdef:` references for USDZ packaging (`CreateNewUsdzPackage` needs real files), override `info:sourceAsset` back to the original `opdef:` URI in a wrapper USDA layer:
-
-```python
-# During baking: record original opdef: URIs for Shader prims
-# After USDZ creation: wrapper overrides sourceAsset back to opdef:
-
-# In wrapper .usda:
-# over "materials" { over "mirror" { over "mirror_surface" {
-#     asset info:sourceAsset = @opdef:/Vop/principledshader::2.0?SurfaceVexCode@
-# }}}
-```
-
-**Requirements:** Karma CPU only (not XPU). Houdini must be installed on the render machine — the OTL libraries (`$HH/otls/OPlibVop.hda`) must be loadable for factory shaders. Custom VOP HDAs need their `.hda` files deployed via `HOUDINI_OTLSCAN_PATH`.
-
-**Fully portable alternative:** Replace VEX shaders with MaterialX (`mtlxstandard_surface`, `ND_*` nodes) or `UsdPreviewSurface`. These work with Karma CPU, XPU, and standalone husk without any Houdini dependencies.
-
-### editmaterialproperties: parm.unexpandedString() Aborts Mid-Node on Non-String Spare Parms
-
-> Houdini 21.0.631
-
-**`editmaterialproperties` LOP nodes have 160+ spare parameters, most of which are non-string types (folders, floats, toggles, vectors). Calling `parm.unexpandedString()` on any of them raises `OperationFailed: Only string parms have unexpanded string`. Without a per-parm try/except, the scan loop aborts on the first non-string spare parm and never reaches later string parms (like file texture paths).**
-
-**Anti-pattern:** Iterating `node.parms()` and calling `parm.unexpandedString()` to scan for file path references. The first spare folder parm raises, killing the loop. File parms like `emission_color_file` appear later in the list and are silently skipped.
-
-**Symptom:** File path parms on `editmaterialproperties` nodes are missed during a scan, even though they contain the search string and `node.parms()` does include them.
-
-**Fix:** Check the parm template type before calling `unexpandedString()`, or guard per-parm:
-
-```python
-for p in node.parms():
-    if p.parmTemplate().type() != hou.parmTemplateType.String:
-        continue
-    try:
-        val = p.unexpandedString()
-    except Exception:
-        continue
-    if search_string in val:
-        hits.append((node.path(), p.name(), val))
-```
-
-**Note:** `node.parms()` DOES include spare parameters — that's not the issue. The issue is solely that non-string spare parms raise on `unexpandedString()`.
-
----
-
-## SOPs / File Cache
-
-### `parm.set()` Silently Ignored When Expression Active
-
-> Houdini 21.0.631
-
-**`parm.set(value)` on a float/int parm is silently ignored if the parm has an active expression or keyframe.** The expression always takes priority. No error, no warning — the value just doesn't stick.
-
-**Anti-pattern:** Created a `filecache::2.0` node and called `fc.parm("f1").set(100)`. The parm still evaluated to `1` because `f1` has a default expression (`$FSTART`). The `set()` call was completely ignored.
-
-**Affected parms on filecache::2.0:** `f1` (`$FSTART`), `f2` (`$FEND`), `f3` (may have `$FINC`). String parms like `basedir` and `basename` are NOT affected — they store raw strings, not expressions.
-
-**Fix:** Call `deleteAllKeyframes()` before `set()` to clear the expression first:
-
-```python
-fc.parm("f1").deleteAllKeyframes()
-fc.parm("f1").set(100)  # Now actually takes effect
-```
-
-**Note:** This applies to any parm with a default expression, not just filecache nodes. Common offenders: `$FSTART`/`$FEND` on frame range parms, `ch("../parm")` on HDA-internal parms.
-
-### hbatch `render` Only Works with ROPs, Not SOPs
-
-> Houdini 21.0.631
-
-**The hbatch `render` command silently does nothing when given a SOP path like a filecache node.** It only works with ROP nodes. No error, no output — just exits cleanly with rc=0.
-
-**Anti-pattern:** `hbatch -c "mread scene.hip; render -f 1 1 /obj/geo/filecache1; quit"` — exits successfully but produces zero cache files.
-
-**Fix:** Use hython with `pressButton()` on the filecache's `execute` parm instead:
-
-```bash
-hython -c '
-import hou
-hou.hipFile.load("scene.hip")
-node = hou.node("/obj/geo/filecache1")
-node.parm("execute").pressButton()
-'
-```
-
-`pressButton()` is synchronous in hython — it blocks until all frames are written.
-
----
-
-## HScript / Run Script
-
-### File > Run Script Only Accepts .cmd, Not .py
-
-> Houdini 21.0.631
-
-**The File > Run Script... menu maps to HScript's `source` command, which parses HScript only.** Picking a `.py` file fails with `Application doesn't support input redirection` (HScript tries to interpret the Python content). Renaming a Python file to `.cmd` doesn't help — same parser, same failure.
-
-**Anti-pattern:** Shipped a plugin's setup as `<plugin>_setup.py` and told users to File > Run Script it. Users hit cryptic HScript parse errors on the first non-comment line.
-
-**Fix — dispatcher pattern:** Ship a tiny `.cmd` that resolves its own path via `$arg0` and exec's a sibling `.py`:
-
-```
-python -c "import os; p=os.path.join(os.path.dirname(os.path.abspath(r'$arg0')),'setup.py'); exec(compile(open(p).read(),p,'exec'),{'__name__':'__main__','__file__':p})"
-```
-
-Two extra notes:
-- HScript's `python -c "..."` argument **must be a single line** — embedded newlines break because HScript reparses subsequent lines as commands. Backslash continuation joins lines but strips the newline.
-- `$arg0` inside a sourced `.cmd` evaluates to the `.cmd`'s own absolute path, which is the cleanest way to find sibling files (HDAs, .py modules) the user dropped next to it.
-
-## General MCP Usage
-
-### Connection Discipline
-
-> Houdini 21.0.631
-
-**The MCP plugin uses a single-threaded TCP listener.**
-
-1. **Ping before starting work** — verify connectivity before issuing commands.
-2. **Never rapid-fire commands** — the plugin needs time to reset between connections.
-3. **If you get a connection error, stop** — don't retry in a loop. The plugin likely needs a restart.
-4. **Use `batch` for bulk operations** — executes atomically in a single undo group.
-
-### Node Inspection Caveats
-
-> Houdini 21.0.631
-
-**`get_node_info` can crash on certain node types.** We encountered a `'Color' object is not iterable` error when calling it on nodes with non-standard color configurations.
-
-**Workaround:** Use `execute_houdini_code` to inspect nodes manually when `get_node_info` fails. Iterate `node.parms()`, `node.inputs()`, `node.outputs()` directly.
-
-### HDA Script Sync
-
-> Houdini 21.0.631
-
-**Editing HDA script files on disk does NOT update the embedded code inside the `.hdalc`.** The HDA definition carries its own copy of `PythonModule.py`, `OnCreated.py`, etc. If you only change the on-disk files, the live HDA keeps running the old code.
-
-**Anti-pattern:** Changed `PythonModule.py` in the repo, committed, but didn't update the HDA definition. The node in Houdini still ran the old logic.
-
-**Fix:** After modifying any HDA script file, push the updated code into the HDA definition — via Type Properties → Scripts in the Houdini UI, or via MCP (`set_hda_section_content` / `update_hda`). Treat HDA sync as part of the commit.
-
-### Diagnostics Workflow
-
-> Houdini 21.0.631
-
-When something looks wrong in a COP network, use `execute_houdini_code` to inspect systematically:
-
-1. **Check network topology** — iterate `parent.children()`, print inputs/outputs for each node.
-2. **Check for errors** — `node.errors()` and `node.warnings()` on each node in the chain.
-3. **Check layer names first** — `node.outputNames()` mismatches are the #1 cause of silent failures in Copernicus. See [Layer Naming](#layer-naming).
-4. **Compare pixel values** — `layer.allBufferElements()` + numpy at specific coordinates. Don't trust visual inspection alone.
-5. **Compare layer metadata** — `outputNames()`, `channelCount()`, `attributes()`, `typeInfo()` between working and broken paths.
-6. **Use a switch node for A/B testing** — insert a switch to isolate which part of the chain causes the issue.
-
-### Copernicus Cooks Nothing in Headless hython
-
-**Problem:** Copernicus (`Cop`) networks produce no pixels when the bridge auto-launches a headless `hython` session.
-
-**Symptom:** A `file` COP cooks with no errors, but `node.layerAtFrame(frame)` returns `None`; downstream nodes fail with `source is missing`; `rop_image` render fails with `Failed to cook layers`. No error explains why.
-
-**Cause:** Copernicus is GPU-accelerated. A headless `hython` with no GPU/display context cannot cook COP layers at all.
-
-**Fix:** Run Copernicus work in a GUI (GPU-backed) Houdini session. For headless pixel work, use `numpy`/`PIL` inside `execute_houdini_code` instead of a COP network. Validated: Houdini 21.0.631.
-
-### GUI/Headless Port Handoff
-
-**Problem:** Only one process can listen on the MCP port (9876). A headless session the bridge auto-launched squats the port, so a GUI opened later cannot take over — and only the GUI has a GPU.
-
-**Fix (built in):** A GUI (interactive) session always wins the port. On `start()`, a GUI that finds the port busy writes a short-lived claim file and retries binding; a headless server sees the claim in its poll loop, stops, and frees the port (its `hython` process then exits). The bridge reconnects to the GUI on its next call. When the GUI closes, the bridge re-spawns headless.
-
-**Notes:** `hou.isUIAvailable()` decides who yields. The installer adds `import houdinimcp` to the GUI startup hooks (see [Autostart Survives a Broken Co-Plugin](#autostart-survives-a-broken-co-plugin)) so a GUI auto-starts the server on launch. The bridge honours `HOUDINIMCP_NO_HEADLESS=1` to forbid the headless fallback entirely (GUI-only mode) — leave it unset for automatic juggling. Validated: Houdini 21.0.631.
-
-### Autostart Survives a Broken Co-Plugin
-
-**Problem:** The GUI plugin does not start and nothing listens on port 9876, even though Houdini opens normally.
-
-**Symptom:** No `HoudiniMCP server started …` line in Houdini's console, and no Python traceback either — the autostart simply never ran. Often paired with an unrelated plugin failing loudly at launch (e.g. `Traceback from Unhandled Exception Loading … redshift4houdini.so`, a version-mismatched render engine).
-
-**Cause:** `pythonrc.py` runs *early*, during `initApplication` (operator-table build). An unhandled exception from another DSO loaded in that phase aborts the whole startup-script step, so `pythonrc.py` never executes. The main window still comes up because per-DSO load errors are caught individually.
-
-**Fix (built in):** Attach the autostart from hooks that run *after* init and survive the abort. The installer adds `import houdinimcp` to `123.py` (empty launch) and `456.py` (scene load) as well as `pythonrc.py` (fast path). `start_server()` is idempotent — it guards on `hou.session.houdinimcp_server` — so importing from several hooks starts the server at most once. Proven with a trace: with a broken Redshift plugin, `pythonrc.py` did not run but `456.py` did, and the server bound from `456.py`. Validated: Houdini 21.0.631.
-
-### License Server Repointed by Installer Upgrade
-
-**Problem:** Bridge-launched Houdini reports `No licenses could be found to run this application` after a SideFX installer upgrade — even though a valid license exists on the machine.
-
-**Symptom:** `hython`/GUI cannot acquire a license; `hserver -l` shows `Connected To: https://www.sidefx.com/license/sesinetd`; `sesictrl print-license` is empty or lists only expired keys.
-
-**Cause:** The installer rewrites `~/.sesi_licenses.pref` to the SideFX **login server**, which serves no active license for accounts that use a local license server. The valid key stays on the local `sesinetd` at `localhost:1715`.
-
-**Anti-pattern:** Ran `sesictrl sync-licenses` to "restore" the license. It returns `HTTP 422: Associated server is not found` — sync is for account-based login licensing, not a local server, so it is the wrong path.
-
-**Fix:** Repoint hserver to the local server and verify the key is there:
-
-```bash
-sesictrl print-license -h localhost --show-all   # confirm the valid key (e.g. "Houdini Indie 21.0")
-hserver -S http://localhost:1715                 # set the running service
-hserver -l                                       # expect: Connected To: http://localhost:1715
-hython -c "import hou; print(hou.licenseCategory())"   # expect: Indie
-```
-
-**Note:** hserver is a **system** service (`/etc/systemd/system/hserver.service`). `-S` sets the already-running service; editing `~/.sesi_licenses.pref` alone does not take effect until hserver restarts. Validated: Houdini 21.0.631.
-
-### Unlicensed Houdini Error-Loop Fills the tmpfs Log
-
-**Problem:** `/tmp` fills to 100%, after which every MCP call, shell command, and license checkout fails with `ENOSPC` or a misleading `No licenses could be found`.
-
-**Symptom:** A single multi-GB file such as `<scratchpad>/houdini_gui3.log`; `df -h /tmp` shows the tmpfs at 100%; `rm` of the file does **not** free the space.
-
-**Cause:** An **unlicensed** Houdini launched ad-hoc — stdout/stderr redirected into a scratchpad file on `/tmp` (tmpfs, sized to RAM) — error-loops (license nag, or a broken co-plugin traceback) and writes GB per minute. `rm` unlinks the name, but the running process still holds the file descriptor, so tmpfs space is not reclaimed until the process closes it.
-
-**Fix:** Reclaim the space without killing an unsaved scene — truncate the held-open fd, then stop the writer:
-
-```bash
-ls -l /proc/<pid>/fd | grep houdini_gui   # find fds pointing at the (deleted) log
-truncate -s 0 /proc/<pid>/fd/1            # frees tmpfs immediately; Houdini stays up
-# then close the Houdini session, or: kill <pid>
-```
-
-**Prevent:** Never redirect a long-running Houdini process's stdout/stderr into the tmpfs scratchpad. Send it to `/dev/null` or a real disk. The bridge's own auto-launch logs to a bounded path (`/tmp/houdini_temp/hserver.log`); this failure comes only from ad-hoc launches that tee into the scratchpad. Validated: Houdini 21.0.631.
+| SOPs / geometry / file cache | [`best_practices/sops.md`](best_practices/sops.md) | wrangle deletion, expression-vs-`set()`, file cache execute |
+| DOPs / POPs / sims | [`best_practices/dops.md`](best_practices/dops.md) | sim cadence & resimulate, force-node gating, POP Source, reading sim geo |
+| Copernicus COPs | [`best_practices/cops.md`](best_practices/cops.md) | layers, ImageLayer, temporal access, COP-HDAs, headless, blend math, diagnostics |
+| COP2 (legacy) | [`best_practices/cop2.md`](best_practices/cop2.md) | vexfilter shaders, Copernicus↔COP2 map, file frame range |
+| LOPs / USD | [`best_practices/lops_usd.md`](best_practices/lops_usd.md) | editmaterialproperties spare-parm scan |
+| ROPs / rendering | [`best_practices/rops_render.md`](best_practices/rops_render.md) | async render discipline, Mantra unlit surface |
+| Karma / husk | [`best_practices/karma.md`](best_practices/karma.md) | standalone husk RenderVars, productName, VEX opdef |
+| MCP & environment | [`best_practices/mcp_and_environment.md`](best_practices/mcp_and_environment.md) | port handoff, autostart, licensing, tmpfs logs, HDA code sync, run-script |
+| HDAs | [`best_practices/hda.md`](best_practices/hda.md) | *(stub — add findings)* |
+| PDG / TOPs | [`best_practices/pdg.md`](best_practices/pdg.md) | *(stub — add findings)* |
+| CHOPs | [`best_practices/chops.md`](best_practices/chops.md) | *(stub — add findings)* |

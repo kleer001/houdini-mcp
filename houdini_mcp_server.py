@@ -311,7 +311,18 @@ def get_houdini_connection() -> HoudiniConnection:
 
 # Now define the MCP server that Claude will talk to over stdio
 mcp = FastMCP("HoudiniMCP", instructions="""\
-IMPORTANT — Houdini MCP Connection Rules:
+IMPORTANT — Houdini MCP — Authoring & Connection Rules:
+
+0. **Build nodes, not code.** The deliverable is a node network a TD can open and edit —
+   not procedural code that does the work. The Python you send is scaffolding to build the
+   graph; the graph's logic lives in nodes. Motion/behavior comes from real solver/force
+   nodes (POP Force, POP Wind, DOP/SOP solvers), NOT from `@v += ...` in a wrangle; wrangles
+   are for attributes and selection. Don't add a control null of promoted parameters unless
+   the user asks. Honest exceptions (creating attributes, grouping, genuinely kinematic looks
+   with no force-node equivalent, real math) stay in a wrangle — say so. Full philosophy plus
+   the LLM pitfall checklist (A–H: don't guess node/parm names, verify silent no-ops, VEX
+   prefixes, sim discipline, respect the co-edited scene, async renders, trace attrs to the
+   render, build incrementally) is in BEST_PRACTICES.md — read it before non-trivial work.
 
 1. **Never rapid-fire commands.** Wait at least 1 second between consecutive tool calls.
    The Houdini plugin uses a single-threaded listener and needs time to reset between connections.
@@ -354,12 +365,13 @@ IMPORTANT — Houdini MCP Connection Rules:
    `monitor_render` to poll for `husk` / `mantra-bin` processes and check if
    the output file exists. No Houdini connection needed.
 
-9. **Document non-trivial discoveries.** If you encounter a silent failure,
-   undocumented API quirk, or required workaround while using this MCP, read
-   `BEST_PRACTICES.md` in the houdini-mcp repo root first to check it isn't
-   already covered, then add a brief entry under the appropriate context
-   section (COPs, SOPs, LOPs, etc.) and update the index. Keep entries short:
-   problem, symptom, fix. No essays.
+9. **Document non-trivial discoveries (two layers).** Read `BEST_PRACTICES.md`
+   (repo root) first — it holds the philosophy, the A–H pitfalls, and a routing table.
+   A short, generalizable, first-pass rule (roughly <=100-200 tokens) goes there; an
+   involved or context-specific gotcha goes strictly in `best_practices/<area>.md`
+   (dops, cops, cop2, sops, lops_usd, rops_render, karma, mcp_and_environment, hda,
+   pdg, chops; create the file if missing). Always include the Houdini version. Keep
+   it to problem, symptom, fix — no essays.
 """)
 
 @asynccontextmanager
