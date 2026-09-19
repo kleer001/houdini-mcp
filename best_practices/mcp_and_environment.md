@@ -96,3 +96,21 @@ truncate -s 0 /proc/<pid>/fd/1            # frees tmpfs immediately; Houdini sta
 ```
 
 **Prevent:** Never redirect a long-running Houdini process's stdout/stderr into the tmpfs scratchpad. Send it to `/dev/null` or a real disk. The bridge's own auto-launch logs to a bounded path (`/tmp/houdini_temp/hserver.log`); this failure comes only from ad-hoc launches that tee into the scratchpad. Validated: Houdini 21.0.631.
+
+---
+
+### Multiple Houdini Instances on One Machine (one GPU)
+
+**Goal:** Several LLMs each drive their own Houdini on the same box.
+
+**Ports:** Every layer (bridge, GUI plugin, headless) reads `HOUDINIMCP_PORT`. Launch each pairing on its own port and point that LLM's bridge env at the same port. The claim file is per-port (`houdinimcp_claim_<port>`), so GUI/headless hand-off stays isolated per instance. The default range is `9876-9883` (eight slots); an out-of-range port fails loudly at bridge start and at plugin bind. Override the range with `HOUDINIMCP_BASE_PORT` and `HOUDINIMCP_MAX_INSTANCES`.
+
+```bash
+HOUDINIMCP_PORT=9876 houdinifx &   # pair 1
+HOUDINIMCP_PORT=9877 houdinifx &   # pair 2
+# each LLM's MCP config sets the matching HOUDINIMCP_PORT
+```
+
+**The real limit is VRAM, not port count.** One GPU serves all instances. Two simultaneous GPU renders (Karma XPU, OpenGL viewport, Copernicus) can exhaust VRAM and crash the card. All render entry points hold a machine-wide OS file lock (`src/houdinimcp/render_lock.py` — `fcntl` on POSIX, `msvcrt` on Windows), so renders serialize across every instance. The OS releases the lock on process exit, so a crashed render never deadlocks the machine. A multi-GPU host that assigns devices itself can disable the lock with `HOUDINIMCP_RENDER_LOCK=0`.
+
+**A render can return `status: gpu_busy`.** Another instance held the GPU past the wait (`HOUDINIMCP_RENDER_LOCK_TIMEOUT`, default 25 s). Back off and retry; do not treat it as a failure. COP cooking is not covered by the lock — serialize heavy Copernicus work by hand. Validated: Houdini 21.0.631.

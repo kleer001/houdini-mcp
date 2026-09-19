@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] — 2026-09-19
+
+### Added
+- **Multiple LLM-driven Houdini instances on one machine.** Each LLM↔Houdini pair binds its own port (`HOUDINIMCP_PORT`), which flows through the bridge, GUI plugin, and headless server. Claim files are per-port, so GUI/headless hand-off stays isolated per instance.
+- **Machine-wide GPU render lock** (`src/houdinimcp/render_lock.py`). One GPU serves every instance, so two simultaneous renders can exhaust VRAM and crash the card. All GPU render commands serialize through one OS file lock, applied centrally in the command dispatcher next to the existing undo grouping. The OS releases the lock when the holder exits, so a crashed render never deadlocks the machine. Cross-platform: `fcntl` on POSIX, `msvcrt` on Windows — no new dependencies.
+- **`status: gpu_busy` response.** A render that waits past the timeout returns `gpu_busy` instead of failing; the driving LLM backs off and retries (server instruction 3a).
+
+### Changed
+- **Instance ceiling is a configurable port range.** Default is eight slots (`9876-9883`); an out-of-range port fails loudly at bridge start and plugin bind. Override with `HOUDINIMCP_BASE_PORT` and `HOUDINIMCP_MAX_INSTANCES`.
+- The render lock is tunable: `HOUDINIMCP_RENDER_LOCK=0` disables it (multi-GPU hosts that assign devices themselves); `HOUDINIMCP_RENDER_LOCK_TIMEOUT` sets the wait (default 25 s, under the bridge's 30 s socket timeout).
+
 ## [0.2.0] — 2026-09-17
 
 ### Changed

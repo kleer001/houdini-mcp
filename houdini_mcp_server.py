@@ -35,7 +35,16 @@ from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP, Context
 import asyncio
 
-HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", 9876))
+# One GPU per machine caps useful instances, so the port range is a soft ceiling:
+# one instance per port. Both bounds are overridable for other hardware.
+MIN_PORT = int(os.getenv("HOUDINIMCP_BASE_PORT", 9876))
+MAX_PORT = MIN_PORT + int(os.getenv("HOUDINIMCP_MAX_INSTANCES", 8)) - 1
+HOUDINI_PORT = int(os.getenv("HOUDINIMCP_PORT", MIN_PORT))
+if not MIN_PORT <= HOUDINI_PORT <= MAX_PORT:
+    raise ValueError(
+        f"HOUDINIMCP_PORT {HOUDINI_PORT} out of range {MIN_PORT}-{MAX_PORT} "
+        "(raise HOUDINIMCP_MAX_INSTANCES to allow more)."
+    )
 HEADLESS_DISABLED = os.getenv("HOUDINIMCP_NO_HEADLESS", "").strip() in ("1", "true", "yes")
 
 logging.basicConfig(level=logging.INFO)
@@ -333,6 +342,10 @@ IMPORTANT — Houdini MCP — Authoring & Connection Rules:
 
 3. **Render commands are slow.** Rendering takes significantly longer than node operations.
    Do not assume a render has failed just because it takes time.
+
+3a. **A render may return `status: gpu_busy`.** The machine has one GPU shared by every
+   Houdini instance, and another instance is rendering. This is not a failure — wait a few
+   seconds and retry the same render.
 
 4. **If you get a connection error, STOP.** Do not retry in a loop — you likely crashed
    the plugin. Tell the user to restart the Houdini MCP plugin and verify the port is

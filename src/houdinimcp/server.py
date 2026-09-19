@@ -89,12 +89,30 @@ from .handlers.rendering import (
     create_render_node, start_render, get_render_progress,
 )
 from .event_collector import EventCollector
+from .render_lock import gpu_render_lock, GPUBusyError
 
 EXTENSION_NAME = "Houdini MCP"
 EXTENSION_VERSION = (0, 2)
 EXTENSION_DESCRIPTION = "Connect Houdini to Claude via MCP"
 
-DEFAULT_PORT = int(os.environ.get("HOUDINIMCP_PORT", 9876))
+# One GPU per machine caps how many Houdini instances are useful at once, so the
+# port range is a soft ceiling: one instance per port. Both bounds are overridable
+# for hosts with different hardware (HOUDINIMCP_BASE_PORT, HOUDINIMCP_MAX_INSTANCES).
+MIN_PORT = int(os.environ.get("HOUDINIMCP_BASE_PORT", 9876))
+MAX_PORT = MIN_PORT + int(os.environ.get("HOUDINIMCP_MAX_INSTANCES", 8)) - 1
+
+
+def _resolve_port():
+    port = int(os.environ.get("HOUDINIMCP_PORT", MIN_PORT))
+    if not MIN_PORT <= port <= MAX_PORT:
+        raise ValueError(
+            "HOUDINIMCP_PORT %d out of range %d-%d (raise HOUDINIMCP_MAX_INSTANCES to allow more)."
+            % (port, MIN_PORT, MAX_PORT)
+        )
+    return port
+
+
+DEFAULT_PORT = _resolve_port()
 
 
 # ---- GUI/headless port handoff ------------------------------------------------
@@ -179,6 +197,12 @@ class HoudiniMCPServer:
         "set_usd_attribute", "create_lop_node",
         "setup_pyro_sim", "setup_rbd_sim", "setup_flip_sim", "setup_vellum_sim",
         "create_material_workflow", "assign_material_workflow", "build_sop_chain", "setup_render",
+    }
+
+    # GPU render commands are serialized machine-wide (one GPU, many instances).
+    RENDER_COMMANDS = {
+        "render_single_view", "render_quad_view", "render_specific_camera",
+        "render_flipbook", "start_render",
     }
 
     # Re-export for tests that reference it on the class
@@ -313,15 +337,23 @@ class HoudiniMCPServer:
         """Entry point for executing a JSON command from the client."""
         try:
             cmd_type = command.get("type", "")
-            if cmd_type in self.MUTATING_COMMANDS:
-                with hou.undos.group(f"MCP: {cmd_type}"):
-                    return self._execute_command_internal(command)
-            else:
-                return self._execute_command_internal(command)
+            if cmd_type in self.RENDER_COMMANDS:
+                with gpu_render_lock():
+                    return self._dispatch_command(cmd_type, command)
+            return self._dispatch_command(cmd_type, command)
+        except GPUBusyError as e:
+            return {"status": "gpu_busy", "message": str(e)}
         except Exception as e:
             print(f"Error executing command: {str(e)}")
             traceback.print_exc()
             return {"status": "error", "message": str(e)}
+
+    def _dispatch_command(self, cmd_type, command):
+        """Dispatch a command, wrapping mutating ones in an undo group."""
+        if cmd_type in self.MUTATING_COMMANDS:
+            with hou.undos.group(f"MCP: {cmd_type}"):
+                return self._execute_command_internal(command)
+        return self._execute_command_internal(command)
 
     def _get_handlers(self):
         """Return the command handler dispatch dict."""
