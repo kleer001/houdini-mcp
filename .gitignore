@@ -21,3 +21,6 @@ hip_parsed.json
 hda_parsed.json
 hip_patterns/
 hip_patterns_index.json
+
+# Research scratch (experiment logs, inventories, not shipped)
+research/
