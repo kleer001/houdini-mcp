@@ -43,3 +43,11 @@ node.parm("execute").pressButton()
 ```
 
 `pressButton()` is synchronous in hython — it blocks until all frames are written.
+
+---
+
+### `$HIP` is empty until the hip is saved
+
+> Houdini 20.0.1544
+
+A fresh headless `hython` session has no `$HIP`. A File / File Cache SOP reading `$HIP/cache/…` then resolves to nothing and cooks **0 points with no error**. Save the hip (`hou.hipFile.save(...)`) before cooking any node whose path uses `$HIP`.

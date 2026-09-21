@@ -69,3 +69,27 @@ attr_spec.default = new_path
 **Requirements:** Karma CPU only (not XPU). Houdini must be installed on the render machine — the OTL libraries (`$HH/otls/OPlibVop.hda`) must be loadable for factory shaders. Custom VOP HDAs need their `.hda` files deployed via `HOUDINI_OTLSCAN_PATH`.
 
 **Fully portable alternative:** Replace VEX shaders with MaterialX (`mtlxstandard_surface`, `ND_*` nodes) or `UsdPreviewSurface`. These work with Karma CPU, XPU, and standalone husk without any Houdini dependencies.
+
+---
+
+### Velocity motion blur needs `velocities` + geosamples ≥ 2
+
+> Houdini 20.0.1544
+
+**Symptom:** No motion blur, and the motion-vector AOV is flat, though points move each frame.
+
+**Cause:** Karma blurs along a `velocities` point attribute across ≥2 geometry time samples. `geosamples=1`, or a missing `velocities` on the USD, gives no blur and an empty AOV. A SOP `v` attribute drives this only once it reaches USD **as `velocities`** — some import LOPs drop it.
+
+**Fix:** Author `v` as `velocities` on the imported geometry; set `geosamples≥2`, `enablemblur=1`, and a camera shutter. Confirm `velocities` on the USD prim, not just the SOP.
+
+---
+
+### EXRs carry the scene OCIO — apply the display transform on 8-bit export
+
+> Houdini 20.0.1544
+
+**Symptom:** PNG previews of a Karma EXR look dark or muddy.
+
+**Cause:** When the session OCIO is an ACES config (`echo $OCIO`), Karma writes linear **ACEScg** EXRs. A straight 8-bit PNG skips the display transform, so it reads dark.
+
+**Fix:** Apply an ACEScg→sRGB (the config's display) transform on EXR→PNG or previews — via `hoiiotool` / `ocioconvert` / OpenImageIO, not a bare `iconvert`.
