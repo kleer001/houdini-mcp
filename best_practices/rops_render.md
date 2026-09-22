@@ -1,6 +1,6 @@
 # Best Practices — ROPs / rendering
 
-Context-specific findings for rendering through ROPs (Mantra and, generally, any render ROP). Karma/`husk`-specific findings are in [`karma.md`](karma.md). The entry layer is [`../BEST_PRACTICES.md`](../BEST_PRACTICES.md).
+Context-specific findings for rendering through ROPs (Mantra and, generally, any render ROP). Karma/`husk` findings are in [`karma.md`](karma.md); Redshift in [`../REDSHIFT_BESTPRACTICES.md`](../REDSHIFT_BESTPRACTICES.md). The entry layer is [`../BEST_PRACTICES.md`](../BEST_PRACTICES.md).
 
 ### Renders are async — poll, don't judge on the immediate file
 

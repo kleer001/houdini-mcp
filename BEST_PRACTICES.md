@@ -25,6 +25,12 @@ Hard-won lessons from real production use of the Houdini MCP. This file is the *
 `POP Source → POP Force (gravity) → POP Wind (large-feature noise) → POP Drag → POP Solver` —
 gate the forces to a "released" point group, and let the solver integrate. Wrangles set only the release time, the group membership, and the color. Rotation you can't get from a force node (flutter) is the allowed kinematic exception: drive `@w` in a wrangle and note it.
 
+**Redundant setups across engines are a legitimate request, not waste.** During look-dev an artist may ask for the same shot set up in more than one render engine (Redshift, Karma, Mantra, Arnold) — or duplicated within one engine — to compare looks, validate the farm's engine, or hedge a deadline. Build each as its own parallel branch; do not apply DRY, collapse them to "one path," or drop one as redundant. The simplicity rules govern how you write a single setup, not whether the artist keeps several in parallel.
+
+**One render with AOVs beats multiple passes.** When a single render can produce every output you need — beauty plus masks, occlusion, depth, IDs — do it in one render with AOVs, not several passes toggled by a material switch. A **custom AOV** carries a shader's output (e.g. a short-range AmbientOcclusion) alongside the beauty, so emission and AO come from one multilayer EXR. Each extra pass adds a full render and more orchestration; reach for a separate pass only when one render genuinely cannot express the output — a different camera, or a different engine (which is the legitimate-redundancy case above).
+
+**Write one multi-layer EXR, split it in comp — not a file per AOV.** Pack the beauty and every AOV into a single multi-channel EXR; one atomic file per frame avoids path sprawl and half-written sets, and matches how compositors pull AOVs. Redshift parm specifics (`RS_outputMultilayerMode`, AOV multiparm, prefix grouping): [`REDSHIFT_BESTPRACTICES.md`](REDSHIFT_BESTPRACTICES.md).
+
 ---
 
 ## Workflow pitfalls (they will bite an LLM)
@@ -72,6 +78,7 @@ When something looks wrong: iterate `children()` printing each node's inputs/out
 | LOPs / USD | [`best_practices/lops_usd.md`](best_practices/lops_usd.md) | editmaterialproperties spare-parm scan |
 | ROPs / rendering | [`best_practices/rops_render.md`](best_practices/rops_render.md) | async render discipline, Mantra unlit surface |
 | Karma / husk | [`best_practices/karma.md`](best_practices/karma.md) | standalone husk RenderVars, productName, VEX opdef |
+| Redshift | [`REDSHIFT_BESTPRACTICES.md`](REDSHIFT_BESTPRACTICES.md) | multi-layer EXR & AOV prefix grouping, Motion Vectors AOV vs 3D blur |
 | MCP & environment | [`best_practices/mcp_and_environment.md`](best_practices/mcp_and_environment.md) | port handoff, autostart, licensing, tmpfs logs, HDA code sync, run-script |
 | HDAs | [`best_practices/hda.md`](best_practices/hda.md) | *(stub — add findings)* |
 | PDG / TOPs | [`best_practices/pdg.md`](best_practices/pdg.md) | *(stub — add findings)* |
