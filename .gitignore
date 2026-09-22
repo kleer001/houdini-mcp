@@ -24,3 +24,6 @@ hip_patterns_index.json
 
 # Research scratch (experiment logs, inventories, not shipped)
 research/
+
+# Session scratch (disposable staging; promote out if it becomes evidence)
+tmp/
