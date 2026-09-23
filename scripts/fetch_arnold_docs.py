@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 from html_to_markdown import html_to_markdown
@@ -39,10 +40,20 @@ DOCS_DIR = os.path.join(REPO_ROOT, "arnold_docs")
 INDEX_PATH = os.path.join(REPO_ROOT, "arnold_docs_index.json")
 
 
-def get(url):
+def get(url, attempts=3):
+    """GET a page, retrying transient network errors (a two-hour run meets some)."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read().decode("utf-8")
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read().decode("utf-8")
+        except urllib.error.HTTPError:
+            raise  # the server answered; retrying will not change it
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == attempts:
+                raise
+            print(f"  retry {attempt}/{attempts - 1} after {e}: {url}", flush=True)
+            time.sleep(REQUEST_DELAY * 5 * attempt)
 
 
 def list_pages(toctree):
