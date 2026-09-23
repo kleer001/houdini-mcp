@@ -5,6 +5,14 @@ import tempfile
 import hou
 
 
+def _vertex_count(geo):
+    """Vertex count via intrinsic — `hou.Geometry` has no `.vertices()` method."""
+    try:
+        return int(geo.intrinsicValue("vertexcount"))
+    except hou.OperationFailed:
+        return sum(len(p.vertices()) for p in geo.prims())
+
+
 def get_geo_summary(node_path):
     """Return geometry stats: point/prim/vertex counts, bbox, attributes."""
     node = hou.node(node_path)
@@ -17,7 +25,7 @@ def get_geo_summary(node_path):
     return {
         "num_points": len(geo.points()),
         "num_prims": len(geo.prims()),
-        "num_vertices": len(geo.vertices()),
+        "num_vertices": _vertex_count(geo),
         "bounding_box": {
             "min": list(bbox.minvec()),
             "max": list(bbox.maxvec()),
@@ -244,7 +252,7 @@ def geo_export(node_path, format="obj", output=None):
         "format": format,
         "num_points": len(geo.points()),
         "num_prims": len(geo.prims()),
-        "num_vertices": len(geo.vertices()),
+        "num_vertices": _vertex_count(geo),
         "bounding_box": {
             "min": list(bbox.minvec()),
             "max": list(bbox.maxvec()),
