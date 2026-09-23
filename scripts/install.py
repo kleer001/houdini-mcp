@@ -45,8 +45,8 @@ def find_houdini_prefs(houdini_version=None):
 
     Mirrors Houdini's own resolution so the plugin installs where the running
     Houdini actually reads from:
-      1. $HOUDINI_USER_PREF_DIR, if set, is used verbatim (Houdini's explicit
-         override).
+      1. $HOUDINI_USER_PREF_DIR, if set, with its __HVER__ token replaced by
+         the version (Houdini's explicit override).
       2. Else, if $HOME is set, Houdini uses $HOME/houdiniX.Y directly. This
          matters on Windows: when launched from a shell (Git Bash exports
          HOME=C:/Users/<u>) Houdini uses $HOME/houdiniX.Y, NOT the Documents
@@ -57,10 +57,14 @@ def find_houdini_prefs(houdini_version=None):
     """
     system = platform.system()
 
-    # 1. Explicit override wins — used verbatim.
+    # 1. Explicit override wins. Houdini requires the __HVER__ token in it and
+    #    substitutes the MAJOR.MINOR version at run time.
     env_pref = os.environ.get("HOUDINI_USER_PREF_DIR")
     if env_pref:
-        return env_pref
+        if houdini_version:
+            return env_pref.replace("__HVER__", houdini_version)
+        matches = sorted(glob.glob(env_pref.replace("__HVER__", "[0-9]*.[0-9]*")), reverse=True)
+        return matches[0] if matches else None
 
     home = os.path.expanduser("~")
     home_env = os.environ.get("HOME")
