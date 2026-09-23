@@ -435,8 +435,8 @@ No Houdini running? Bridge auto-launches hython → headless_server.py → serve
 ### Documentation Search (2)
 | Tool | Description |
 |------|-------------|
-| `search_docs` | BM25 search across 30,000+ documents (no Houdini needed) |
-| `get_doc` | Read full content of a doc page |
+| `search_docs` | BM25 search across 30,000+ documents (no Houdini needed); `source` picks Houdini docs, the Redshift manual, or the Arnold guides |
+| `get_doc` | Read full content of a doc page from any `source` |
 
 </details>
 

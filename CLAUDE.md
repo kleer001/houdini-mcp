@@ -108,7 +108,7 @@ No Houdini? Bridge auto-launches: hython → headless_server.py → server.py �
 - Runs in a **separate** Python process (via `uv run`).
 - `HoudiniConnection` dataclass manages a persistent TCP connection (global singleton).
 - `_send_tool_command()` helper reduces each MCP tool to ~3 lines.
-- `search_docs` and `get_doc` tools run locally via `houdini_rag.py` — no Houdini connection needed.
+- `search_docs` and `get_doc` tools run locally via `houdini_rag.py` — no Houdini connection needed. `source` selects `houdini` (docs + hip patterns), `redshift` or `arnold`; each renderer manual has its own gitignored index (`RENDERER_DOCS` in `houdini_rag.py`).
 - **Headless auto-launch**: if no Houdini is listening, `find_hython()` locates the binary and `_launch_headless_houdini()` spawns `scripts/headless_server.py` in a managed subprocess. Cleaned up on shutdown via lifespan + atexit. Disable with `HOUDINIMCP_NO_HEADLESS=1`.
 - **GUI launch is the LLM's job, not the server's**: the server only ever auto-launches *headless* hython. GUI-only work (viewport, flipbooks, GPU-only Copernicus/COPs) needs a real GUI session. When the user asks for it, the assistant launches the `houdini`/`houdinifx` binary from the shell itself (see instructions rule 5a in `houdini_mcp_server.py`) — it does not ask the user to open it. It does not open the GUI unprompted.
 

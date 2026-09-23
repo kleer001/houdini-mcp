@@ -2,6 +2,8 @@
 
 Redshift-specific findings for rendering through the Redshift ROP in Houdini. The entry layer is [`BEST_PRACTICES.md`](BEST_PRACTICES.md); engine-agnostic render discipline is in [`best_practices/rops_render.md`](best_practices/rops_render.md), and Karma in [`best_practices/karma.md`](best_practices/karma.md).
 
+The Redshift for Houdini manual is searchable offline: `search_docs(query, source="redshift")` (build it with `scripts/fetch_redshift_docs.py`). The manual names parameters by their UI labels only — it never gives internal parm names such as `RS_outputMultilayerMode`. Read those from the ROP itself (`[p.name() for p in rop.parms()]`) before you script it.
+
 ### AOVs: one multi-layer EXR, not a file per AOV
 
 > Redshift (repo env: 2026.3.1 / Houdini 20.0.896). `RS_outputMultilayerMode` and its `"1"`/`"2"` string values are confirmed across production pipelines — AYON `ayon-houdini`, Prism, quadpype; the `RS_aov*` multiparm names in the RsCreative `Houdini_AOV_Tool` (`set_aovs.py`).

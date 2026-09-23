@@ -227,6 +227,29 @@ This downloads ~1 GB of Houdini documentation and builds `houdini_docs_index.jso
 - Check network connectivity — the script downloads from SideFX's documentation site
 - If it partially downloaded, delete the `houdini_docs/` directory and `houdini_docs_index.json`, then re-run the fetch script
 
+### Redshift or Arnold search returns "docs index not available"
+
+Each renderer manual has its own index. Build the one you need:
+
+```bash
+uv run python scripts/fetch_redshift_docs.py   # redshift_docs/ + redshift_docs_index.json
+uv run python scripts/fetch_arnold_docs.py     # arnold_docs/ + arnold_docs_index.json
+```
+
+`fetch_redshift_docs.py` downloads Maxon's offline help ZIP (~2.7 GB) to a temporary
+directory and keeps only the text. Pass `--zip PATH` to use a ZIP you already have.
+To re-fetch, delete `redshift_docs/` first.
+
+`fetch_arnold_docs.py` fetches each page with a 6-second delay. If it stops (network
+error, Ctrl+C), run it again: it skips the pages it already has.
+
+### Arnold results miss pages that exist
+
+A search on a source whose docs exist but whose index does not builds the index on
+the spot. A search made while `fetch_arnold_docs.py` is still running therefore
+indexes only the pages fetched so far. The fetch script rebuilds the index when it
+finishes; if it was interrupted, delete `arnold_docs_index.json` and re-run it.
+
 ### Search results seem irrelevant
 
 The BM25 search is keyword-based. Tips:

@@ -91,6 +91,15 @@ python scripts/fetch_houdini_docs.py
 This downloads ~11,000 Houdini documentation pages and builds a BM25 search index.
 Once built, Claude can search Houdini docs offline without a Houdini connection.
 
+To search a renderer manual too, build its separate index:
+
+```bash
+python scripts/fetch_redshift_docs.py   # Redshift for Houdini (Maxon offline help ZIP, ~2.7 GB download)
+python scripts/fetch_arnold_docs.py     # Arnold core + HtoA guides (~2 hours at 6 s per page)
+```
+
+Claude then passes `source="redshift"` or `source="arnold"` to `search_docs`.
+
 ## What's Next?
 
 - See the [Tool Reference](GUIDE_TOOLS.md) for all 41+ MCP tools

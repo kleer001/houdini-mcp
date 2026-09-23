@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Offline renderer manuals as separate search sources.** `search_docs` and `get_doc` take `source`: `houdini` (default: Houdini docs and hip patterns), `redshift`, or `arnold`. Each renderer has its own index, so its pages do not dilute Houdini results.
+  - `scripts/fetch_redshift_docs.py` reads the Redshift for Houdini manual from Maxon's official offline help ZIP (only the HTML pages; the ZIP is discarded).
+  - `scripts/fetch_arnold_docs.py` fetches the Arnold core and HtoA user guides from help.autodesk.com (CC BY-NC-SA 3.0), with a 6-second delay between requests. A rerun resumes an interrupted fetch.
+  - `scripts/html_to_markdown.py` — stdlib converter shared by both fetchers.
+  - The manuals are copyrighted, so their markdown and indexes are gitignored.
+
+### Fixed
+- `get_geo_summary` and `geo_export` no longer crash on point-only geometry; `hou.Geometry` has no `vertices()` (#4, thanks @arghhhhh).
+- `capture_screenshot` works on Houdini 21, where `GeometryViewport.saveAsImage` was removed (#5, thanks @arghhhhh).
+- `install.py` honors `HOUDINI_USER_PREF_DIR` (expanding `__HVER__`) and `$HOME` on Windows (#6, thanks @arghhhhh).
+- Windows: all text files open as UTF-8, doc paths use forward slashes, and install detection picks the newest Houdini by parsed version, never Houdini Server (from #2, thanks @ysysimon).
+- `tests/test_server_commands.py` failed to import: the `hou` mock lacked `isUIAvailable()`.
+
 ## [0.3.1] — 2026-09-23
 
 ### Fixed
