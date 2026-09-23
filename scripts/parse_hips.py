@@ -172,7 +172,7 @@ def _run_worker(chunk_path, output_path):
     """Worker mode: process a chunk of .hip paths, write results to JSON."""
     import hou
 
-    with open(chunk_path) as f:
+    with open(chunk_path, encoding="utf-8") as f:
         hip_files = json.load(f)
 
     all_results = []
@@ -190,7 +190,7 @@ def _run_worker(chunk_path, output_path):
             errors += 1
             print(f"  [{i}/{len(hip_files)}] {basename}: ERROR — {e}")
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump({"results": all_results, "errors": errors}, f)
 
 
@@ -248,7 +248,7 @@ def _run_parallel(hfs, hip_files, output_path, workers):
             continue
         chunk_path = os.path.join(tmpdir, f"chunk_{w}.json")
         out_path = os.path.join(tmpdir, f"result_{w}.json")
-        with open(chunk_path, "w") as f:
+        with open(chunk_path, "w", encoding="utf-8") as f:
             json.dump(chunks[w], f)
         output_files.append(out_path)
 
@@ -269,7 +269,7 @@ def _run_parallel(hfs, hip_files, output_path, workers):
         proc.wait()
         out_path = output_files[w]
         if os.path.exists(out_path):
-            with open(out_path) as f:
+            with open(out_path, encoding="utf-8") as f:
                 data = json.load(f)
             all_results.extend(data["results"])
             total_errors += data["errors"]
@@ -300,7 +300,7 @@ def _auto_workers(hip_count):
 
     # Hip files are heavier than HDAs — 1200 MB headroom per worker
     try:
-        with open("/proc/meminfo") as f:
+        with open("/proc/meminfo", encoding="utf-8") as f:
             for line in f:
                 if line.startswith("MemAvailable:"):
                     avail_mb = int(line.split()[1]) / 1024
@@ -372,7 +372,7 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.dirname(script_dir)
     output_path = args.output or os.path.join(repo_root, "hip_parsed.json")
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2)
 
     print(f"\n{'='*60}")

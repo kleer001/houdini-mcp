@@ -338,7 +338,7 @@ class TestWritePatterns:
             write_patterns(patterns, tmpdir)
             for p in patterns:
                 path = os.path.join(tmpdir, f"{p['id']}.txt")
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     assert f.read() == p["text"]
 
 
@@ -354,7 +354,7 @@ class TestBuildPatternsIndex:
             entries = build_patterns_index(patterns, idx_path)
             assert os.path.exists(idx_path)
 
-            with open(idx_path) as f:
+            with open(idx_path, encoding="utf-8") as f:
                 loaded = json.load(f)
             assert len(loaded) == len(patterns)
 

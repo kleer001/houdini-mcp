@@ -29,7 +29,7 @@ def list_unannotated(limit=20):
     if not os.path.exists(INDEX_PATH):
         return {"error": "No patterns index found. Run: python scripts/ingest_hips.py extract"}
 
-    with open(INDEX_PATH) as f:
+    with open(INDEX_PATH, encoding="utf-8") as f:
         entries = json.load(f)
 
     unannotated = []
@@ -37,7 +37,7 @@ def list_unannotated(limit=20):
         filepath = os.path.join(PATTERNS_DIR, f"{entry['id']}.txt")
         if not os.path.exists(filepath):
             continue
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             content = f.read()
         if "## Annotation" not in content:
             unannotated.append(entry)
@@ -52,7 +52,7 @@ def get_pattern(pattern_id):
     filepath = os.path.join(PATTERNS_DIR, f"{pattern_id}.txt")
     if not os.path.exists(filepath):
         return {"error": f"Pattern not found: {pattern_id}"}
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         return {"id": pattern_id, "content": f.read()}
 
 
@@ -61,11 +61,11 @@ def annotate_pattern(pattern_id, summary):
     filepath = os.path.join(PATTERNS_DIR, f"{pattern_id}.txt")
     if not os.path.exists(filepath):
         return {"error": f"Pattern not found: {pattern_id}"}
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
     if "## Annotation" in content:
         return {"error": f"Pattern {pattern_id} is already annotated"}
-    with open(filepath, "a") as f:
+    with open(filepath, "a", encoding="utf-8") as f:
         f.write(f"\n\n## Annotation\n{summary}\n")
     return {"status": "ok", "id": pattern_id}
 
@@ -75,7 +75,7 @@ def get_progress():
     if not os.path.exists(INDEX_PATH):
         return {"annotated": 0, "total": 0, "percent": 0.0}
 
-    with open(INDEX_PATH) as f:
+    with open(INDEX_PATH, encoding="utf-8") as f:
         entries = json.load(f)
 
     annotated = 0
@@ -84,7 +84,7 @@ def get_progress():
         filepath = os.path.join(PATTERNS_DIR, f"{entry['id']}.txt")
         if not os.path.exists(filepath):
             continue
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             if "## Annotation" in f.read():
                 annotated += 1
 

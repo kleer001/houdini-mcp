@@ -19,7 +19,7 @@ def _load_find_render_processes():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "houdini_mcp_server.py",
     )
-    with open(bridge_path) as f:
+    with open(bridge_path, encoding="utf-8") as f:
         source = f.read()
 
     tree = ast.parse(source)

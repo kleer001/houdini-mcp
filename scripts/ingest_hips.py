@@ -21,6 +21,7 @@ import glob
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -32,6 +33,38 @@ REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 HIP_EXTENSIONS = {".hip", ".hipnc"}
 HDA_EXTENSIONS = {".hda", ".otl"}
 ALL_EXTENSIONS = HIP_EXTENSIONS | HDA_EXTENSIONS
+
+
+def _select_highest_version_houdini_path(candidates, system):
+    """Return the highest-version Houdini install path from candidate directories.
+
+    This explicitly returns the highest-version Houdini path when candidate
+    directory names contain parseable version numbers. If no versioned names
+    match for the current platform, falls back to reverse string sorting.
+    """
+    version_patterns = {
+        "Linux": r"^hfs(\d+)\.(\d+)(?:\.(\d+))?$",
+        "Darwin": r"^Houdini(\d+)\.(\d+)(?:\.(\d+))?$",
+        "Windows": r"^Houdini (\d+)\.(\d+)(?:\.(\d+))?$",
+    }
+    pattern = version_patterns.get(system)
+    all_candidates = [path for path in candidates if os.path.isdir(path)]
+    if not pattern:
+        return sorted(all_candidates, reverse=True)
+
+    versioned_candidates = []
+    for path in all_candidates:
+        name = os.path.basename(path)
+        match = re.match(pattern, name)
+        if not match:
+            continue
+        major = int(match.group(1))
+        minor = int(match.group(2))
+        build = int(match.group(3) or 0)
+        versioned_candidates.append(((major, minor, build), path))
+
+    versioned_candidates.sort(reverse=True)
+    return [path for _version, path in versioned_candidates] or sorted(all_candidates, reverse=True)
 
 
 def find_houdini_install(hfs_dir=None):
@@ -50,13 +83,16 @@ def find_houdini_install(hfs_dir=None):
 
     system = platform.system()
     if system == "Linux":
-        candidates = sorted(glob.glob("/opt/hfs*"), reverse=True)
+        candidates = _select_highest_version_houdini_path(glob.glob("/opt/hfs*"), system)
     elif system == "Darwin":
-        candidates = sorted(glob.glob("/Applications/Houdini/Houdini*"), reverse=True)
+        candidates = _select_highest_version_houdini_path(
+            glob.glob("/Applications/Houdini/Houdini*"),
+            system,
+        )
     elif system == "Windows":
-        candidates = sorted(
+        candidates = _select_highest_version_houdini_path(
             glob.glob(r"C:\Program Files\Side Effects Software\Houdini *"),
-            reverse=True,
+            system,
         )
     else:
         candidates = []
@@ -203,7 +239,7 @@ def _cmd_parse_cpio(args):
 
     # Write results to JSON
     output_path = args.output or os.path.join(REPO_ROOT, "hip_parsed.json")
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
     print(f"\n{'='*60}")
@@ -288,17 +324,20 @@ def cmd_extract(args):
     parsed_scenes = []
     if os.path.exists(hip_path):
         print(f"Loading .hip data from {hip_path}")
-        with open(hip_path) as f:
+        with open(hip_path, encoding="utf-8") as f:
             parsed_scenes.extend(json.load(f))
     else:
         print("No hip_parsed.json found, running parse first...")
         cmd_parse(args)
-        with open(hip_path) as f:
+        if not os.path.exists(hip_path):
+            print(f"No parsed .hip data available at {hip_path} - skipping pattern extraction.")
+            return
+        with open(hip_path, encoding="utf-8") as f:
             parsed_scenes.extend(json.load(f))
 
     if os.path.exists(hda_path):
         print(f"Loading .hda data from {hda_path}")
-        with open(hda_path) as f:
+        with open(hda_path, encoding="utf-8") as f:
             hda_scenes = json.load(f)
         parsed_scenes.extend(hda_scenes)
         print(f"  {len(hda_scenes)} HDA definitions loaded")
