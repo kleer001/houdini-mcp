@@ -143,6 +143,7 @@ _hou_mock.LopSelectionRule = type("LopSelectionRule", (), {
     "setTypeName": lambda self, t: None,
     "expandedPaths": lambda self, n: [],
 })
+_hou_mock.isUIAvailable = lambda: False
 sys.modules["hou"] = _hou_mock
 
 # Mock PySide2
