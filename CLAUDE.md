@@ -58,6 +58,8 @@ scripts/
     headless_server.py         # Run MCP TCP server inside hython (no GUI)
     fetch_houdini_docs.py      # Download Houdini docs corpus and build BM25 index
     fetch_redshift_docs.py     # Redshift manual from Maxon offline help ZIP → separate BM25 index
+    fetch_arnold_docs.py       # Arnold core + HtoA guides from help.autodesk.com → separate BM25 index
+    html_to_markdown.py        # Shared vendor-help HTML → markdown converter (stdlib)
     hip_parser.py              # Cpio-based .hip file parser (stdlib only)
     hip_patterns.py            # Pattern extraction from parsed .hip data
 tests/                         # pytest test suite (69 tests)

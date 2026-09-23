@@ -23,7 +23,8 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
-from html.parser import HTMLParser
+
+from html_to_markdown import html_to_markdown
 
 DOWNLOADS_PAGE = "https://www.maxon.net/en/downloads"
 ZIP_URL_RE = re.compile(r"https://help\.maxon\.net/download/[^\"'\s]*_houdini_en-us_offline_help\.zip")
@@ -34,93 +35,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
 DOCS_DIR = os.path.join(REPO_ROOT, "redshift_docs")
 INDEX_PATH = os.path.join(REPO_ROOT, "redshift_docs_index.json")
-
-HEADINGS = {"h1": "#", "h2": "##", "h3": "###", "h4": "####", "h5": "#####", "h6": "######"}
-BLOCKS = {"p", "div", "ul", "ol", "table", "tr", "blockquote", "details", "summary"}
-SKIPPED = {"script", "style", "img", "svg", "video", "iframe"}
-VOID = {"br", "img", "hr", "input", "meta", "link", "source", "wbr", "col"}
-
-
-class MainContentToMarkdown(HTMLParser):
-    """Convert the MadCap Flare main content div of one page to markdown.
-
-    Every page repeats the full site navigation; only the subtree of
-    <div id="mc-main-content"> is kept, minus elements marked "nocontent"
-    (breadcrumbs, toolbars).
-    """
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.out = []
-        self.depth = 0          # open elements inside the main div; 0 = outside
-        self.skip_depth = 0     # >0 while inside a skipped subtree
-        self.in_pre = False
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        if self.depth == 0:
-            if tag == "div" and attrs.get("id") == "mc-main-content":
-                self.depth = 1
-            return
-        if tag not in VOID:
-            self.depth += 1
-        if self.skip_depth:
-            if tag not in VOID:
-                self.skip_depth += 1
-            return
-        if tag in SKIPPED or "nocontent" in (attrs.get("class") or ""):
-            if tag not in VOID:
-                self.skip_depth = 1
-            return
-        if tag in HEADINGS:
-            self.out.append(f"\n\n{HEADINGS[tag]} ")
-        elif tag == "li":
-            self.out.append("\n- ")
-        elif tag in ("td", "th"):
-            self.out.append(" | ")
-        elif tag == "pre":
-            self.in_pre = True
-            self.out.append("\n\n```\n")
-        elif tag == "code" and not self.in_pre:
-            self.out.append("`")
-        elif tag == "br":
-            self.out.append("\n")
-        elif tag in BLOCKS:
-            self.out.append("\n\n")
-
-    def handle_endtag(self, tag):
-        if self.depth == 0 or tag in VOID:
-            return
-        self.depth -= 1
-        if self.skip_depth:
-            self.skip_depth -= 1
-            return
-        if tag in HEADINGS or tag in BLOCKS:
-            self.out.append("\n\n")
-        elif tag == "pre":
-            self.in_pre = False
-            self.out.append("\n```\n\n")
-        elif tag == "code" and not self.in_pre:
-            self.out.append("`")
-
-    def handle_data(self, data):
-        if self.depth == 0 or self.skip_depth:
-            return
-        self.out.append(data if self.in_pre else re.sub(r"\s+", " ", data))
-
-    def markdown(self):
-        text = "".join(self.out)
-        text = re.sub(r"[ \t]+\n", "\n", text)
-        text = re.sub(r"\n[ \t]+(?=\S)", "\n", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
-
-
-def html_to_markdown(html):
-    parser = MainContentToMarkdown()
-    parser.feed(html)
-    parser.close()
-    return parser.markdown()
 
 
 def find_zip_url():
@@ -151,7 +65,7 @@ def convert_zip(zip_path):
             if "/Content/html/" not in name or not name.endswith(".html"):
                 continue
             filename = name.rsplit("/", 1)[1]
-            body = html_to_markdown(zf.read(name).decode("utf-8"))
+            body = html_to_markdown(zf.read(name).decode("utf-8"), "mc-main-content", {"nocontent"})
             header = f"Source: {ONLINE_BASE}{filename}\n© MAXON Computer\n\n"
             out_name = filename[: -len(".html")].replace("+", "_") + ".md"
             with open(os.path.join(DOCS_DIR, out_name), "w", encoding="utf-8") as f:

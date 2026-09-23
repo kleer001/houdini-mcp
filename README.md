@@ -156,6 +156,13 @@ The script downloads Maxon's official offline help ZIP (~2.7 GB) and keeps only 
 python scripts/fetch_redshift_docs.py              # or: --zip PATH to use a ZIP on disk
 ```
 
+Optional: index the Arnold core and HtoA user guides (`source="arnold"`). Autodesk offers no
+offline copy, so the script fetches each page politely (~2 hours; a rerun resumes):
+
+```bash
+python scripts/fetch_arnold_docs.py
+```
+
 </details>
 
 ## What You Get

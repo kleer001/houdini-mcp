@@ -27,6 +27,11 @@ RENDERER_DOCS = {
         Path(os.environ.get("HOUDINIMCP_REDSHIFT_INDEX", SCRIPT_DIR / "redshift_docs_index.json")),
         "scripts/fetch_redshift_docs.py",
     ),
+    "arnold": (
+        Path(os.environ.get("HOUDINIMCP_ARNOLD_DOCS_DIR", SCRIPT_DIR / "arnold_docs")),
+        Path(os.environ.get("HOUDINIMCP_ARNOLD_INDEX", SCRIPT_DIR / "arnold_docs_index.json")),
+        "scripts/fetch_arnold_docs.py",
+    ),
 }
 DOC_SOURCES = ("houdini", *RENDERER_DOCS)
 

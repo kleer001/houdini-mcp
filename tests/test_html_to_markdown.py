@@ -1,10 +1,11 @@
-"""Tests for scripts/fetch_redshift_docs.py HTML-to-markdown conversion."""
+"""Tests for scripts/html_to_markdown.py and scripts/fetch_redshift_docs.py."""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 
-from fetch_redshift_docs import html_to_markdown, ZIP_URL_RE  # noqa: E402
+from fetch_redshift_docs import ZIP_URL_RE  # noqa: E402
+from html_to_markdown import html_to_markdown  # noqa: E402
 
 PAGE = """<html><head><title>T</title><script>var x = 1;</script></head><body>
 <nav><ul><li><a href="Other.html">Other page</a></li></ul></nav>
@@ -19,6 +20,7 @@ PAGE = """<html><head><title>T</title><script>var x = 1;</script></head><body>
     <ul><li>Frame range</li><li>Takes</li></ul>
     <pre>rsProxy -f file.rs</pre>
     <p>Use <code>$AOV</code> in the name.</p>
+    <table><tr><td><img src="a.png"></img></td><td><img src="b.png"></img></td></tr></table>
   </div>
   <div class="buttons nocontent"></div>
 </div>
@@ -28,7 +30,7 @@ PAGE = """<html><head><title>T</title><script>var x = 1;</script></head><body>
 
 
 def test_keeps_only_main_content():
-    md = html_to_markdown(PAGE)
+    md = html_to_markdown(PAGE, "mc-main-content", {"nocontent"})
     assert "Other page" not in md
     assert "You are here" not in md
     assert "Back to top" not in md
@@ -37,7 +39,7 @@ def test_keeps_only_main_content():
 
 
 def test_structure():
-    md = html_to_markdown(PAGE)
+    md = html_to_markdown(PAGE, "mc-main-content", {"nocontent"})
     assert md.startswith("# Redshift ROP Node")
     assert "\n## Main Tab\n" in md
     assert "The core of the plugin is the ROP node." in md
@@ -45,6 +47,7 @@ def test_structure():
     assert "```\nrsProxy -f file.rs\n```" in md
     assert "Use `$AOV` in the name." in md
     assert "\n\n\n" not in md
+    assert not md.rstrip().endswith("|")
 
 
 def test_zip_url_pattern():

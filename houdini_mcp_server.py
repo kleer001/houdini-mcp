@@ -1652,8 +1652,9 @@ def subscribe_houdini_events(ctx: Context, types: List[str] = None) -> str:
 @mcp.tool()
 def search_docs(ctx: Context, query: str, top_k: int = 5, source: str = "houdini") -> str:
     """Search documentation offline using BM25.
-    source: "houdini" (Houdini docs + hip patterns) or "redshift" (Redshift for
-    Houdini manual). Each source has its own index.
+    source: "houdini" (Houdini docs + hip patterns), "redshift" (Redshift for
+    Houdini manual) or "arnold" (Arnold core + HtoA user guides). Each source
+    has its own index.
     Returns ranked results with path, title, preview, and relevance score.
     Does NOT require a Houdini connection."""
     from houdini_rag import search_docs as _search

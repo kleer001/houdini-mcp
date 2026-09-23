@@ -224,8 +224,9 @@ Filter which events to collect. Pass `types` as a list, or omit for all events.
 BM25 search across Houdini documentation. Parameters:
 - `query` (required): search text
 - `top_k`: number of results (default 5)
-- `source`: `"houdini"` (default: Houdini docs and hip patterns) or `"redshift"`
-  (Redshift for Houdini manual). Each source has its own index.
+- `source`: `"houdini"` (default: Houdini docs and hip patterns), `"redshift"`
+  (Redshift for Houdini manual) or `"arnold"` (Arnold core and HtoA user
+  guides). Each source has its own index.
 
 Returns ranked results with path, title, preview (500 chars), and relevance score.
 
@@ -235,4 +236,5 @@ returned by and passed to `search_docs`.
 
 These tools work without a Houdini connection. Requires running
 `python scripts/fetch_houdini_docs.py` first, and
-`python scripts/fetch_redshift_docs.py` for the `redshift` source.
+`python scripts/fetch_redshift_docs.py` for the `redshift` source and
+`python scripts/fetch_arnold_docs.py` for the `arnold` source.
