@@ -24,6 +24,10 @@ def initialize_plugin():
     # Auto-start server if you want:
     start_server()
 
-# Auto-load on import (skipped for headless — managed by headless_server.py)
-if not os.environ.get("HOUDINIMCP_HEADLESS"):
+# Auto-start only in an interactive GUI session. Never under headless hython:
+# batch tools (e.g. a render farm's scene analysis) launch hython, where an
+# unsolicited server thread breaks the run — and the UI-bound bridge cannot
+# work headless anyway. Opt out in the GUI with HOUDINIMCP_AUTOSTART=0; start
+# it on demand from the HoudiniMCP shelf when headless access is needed.
+if hou.isUIAvailable() and os.environ.get("HOUDINIMCP_AUTOSTART", "1") != "0":
     initialize_plugin()
