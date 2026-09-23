@@ -149,6 +149,13 @@ python scripts/fetch_houdini_docs.py
 
 This enables the `search_docs` and `get_doc` tools — they work offline without a Houdini connection.
 
+Optional: index the Redshift for Houdini manual as a separate source (`source="redshift"`).
+The script downloads Maxon's official offline help ZIP (~2.7 GB) and keeps only the text:
+
+```bash
+python scripts/fetch_redshift_docs.py              # or: --zip PATH to use a ZIP on disk
+```
+
 </details>
 
 ## What You Get

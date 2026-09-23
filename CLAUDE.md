@@ -57,6 +57,7 @@ scripts/
     launch.py                  # Launch Houdini and/or MCP bridge
     headless_server.py         # Run MCP TCP server inside hython (no GUI)
     fetch_houdini_docs.py      # Download Houdini docs corpus and build BM25 index
+    fetch_redshift_docs.py     # Redshift manual from Maxon offline help ZIP → separate BM25 index
     hip_parser.py              # Cpio-based .hip file parser (stdlib only)
     hip_patterns.py            # Pattern extraction from parsed .hip data
 tests/                         # pytest test suite (69 tests)

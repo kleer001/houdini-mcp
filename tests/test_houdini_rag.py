@@ -227,6 +227,46 @@ class TestSearchAndGetDoc:
 
 
 # ---------------------------------------------------------------------------
+# Renderer manual sources (separate indexes)
+# ---------------------------------------------------------------------------
+class TestRendererSources:
+    def _use_temp_redshift(self, monkeypatch, tmp_path):
+        import houdini_rag
+        docs = tmp_path / "redshift_docs"
+        docs.mkdir()
+        (docs / "AOVs.md").write_text("# AOVs\nMulti-layer EXR output for AOVs.", encoding="utf-8")
+        monkeypatch.setattr(houdini_rag, "RENDERER_DOCS", {
+            "redshift": (docs, tmp_path / "rs_index.json", "scripts/fetch_redshift_docs.py"),
+        })
+        monkeypatch.setattr(houdini_rag, "_renderer_indexes", {})
+        return tmp_path
+
+    def test_unknown_source(self):
+        assert "error" in search_docs("aov", source="nope")
+        assert "error" in get_doc_content("x.md", source="nope")
+
+    def test_search_builds_separate_index(self, monkeypatch, tmp_path):
+        self._use_temp_redshift(monkeypatch, tmp_path)
+        results = search_docs("multi-layer exr", source="redshift")
+        assert results[0]["path"] == "AOVs.md"
+        assert (tmp_path / "rs_index.json").exists()
+
+    def test_missing_renderer_docs_names_fetch_script(self, monkeypatch, tmp_path):
+        import houdini_rag
+        monkeypatch.setattr(houdini_rag, "RENDERER_DOCS", {
+            "redshift": (tmp_path / "none", tmp_path / "none.json", "scripts/fetch_redshift_docs.py"),
+        })
+        monkeypatch.setattr(houdini_rag, "_renderer_indexes", {})
+        result = search_docs("aov", source="redshift")
+        assert "fetch_redshift_docs.py" in result["error"]
+
+    def test_get_doc_from_renderer_source(self, monkeypatch, tmp_path):
+        self._use_temp_redshift(monkeypatch, tmp_path)
+        result = get_doc_content("AOVs.md", source="redshift")
+        assert "Multi-layer EXR" in result["content"]
+
+
+# ---------------------------------------------------------------------------
 # PatternLoader
 # ---------------------------------------------------------------------------
 class TestPatternLoader:

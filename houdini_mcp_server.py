@@ -1650,22 +1650,24 @@ def subscribe_houdini_events(ctx: Context, types: List[str] = None) -> str:
 
 
 @mcp.tool()
-def search_docs(ctx: Context, query: str, top_k: int = 5) -> str:
-    """Search Houdini documentation offline using BM25.
+def search_docs(ctx: Context, query: str, top_k: int = 5, source: str = "houdini") -> str:
+    """Search documentation offline using BM25.
+    source: "houdini" (Houdini docs + hip patterns) or "redshift" (Redshift for
+    Houdini manual). Each source has its own index.
     Returns ranked results with path, title, preview, and relevance score.
     Does NOT require a Houdini connection."""
     from houdini_rag import search_docs as _search
-    results = _search(query, top_k)
+    results = _search(query, top_k, source)
     if isinstance(results, dict) and "error" in results:
         return f"Error: {results['error']}"
     return json.dumps(results, indent=2)
 
 @mcp.tool()
-def get_doc(ctx: Context, path: str) -> str:
-    """Get the full content of a Houdini documentation page by its relative path
-    (as returned by search_docs). Does NOT require a Houdini connection."""
+def get_doc(ctx: Context, path: str, source: str = "houdini") -> str:
+    """Get the full content of a documentation page by its relative path and
+    source (as returned by search_docs). Does NOT require a Houdini connection."""
     from houdini_rag import get_doc_content
-    result = get_doc_content(path)
+    result = get_doc_content(path, source)
     if "error" in result:
         return f"Error: {result['error']}"
     return json.dumps(result, indent=2)

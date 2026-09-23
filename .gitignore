@@ -16,6 +16,10 @@ wheels/
 houdini_docs/
 houdini_docs_index.json
 
+# Redshift manual (© MAXON; fetched via scripts/fetch_redshift_docs.py)
+redshift_docs/
+redshift_docs_index.json
+
 # Hip ingest output (generated via scripts/ingest_hips.py and extract_hdas.py)
 hip_parsed.json
 hda_parsed.json
