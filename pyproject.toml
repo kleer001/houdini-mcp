@@ -1,6 +1,6 @@
 [project]
 name = "houdinimcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP bridge connecting SideFX Houdini to Claude AI"
 readme = "README.md"
 requires-python = ">=3.10"

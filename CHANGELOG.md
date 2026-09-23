@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] — 2026-09-23
+
+### Fixed
+- **Plugin auto-start runs only in interactive GUI sessions.** The old guard tested `HOUDINIMCP_HEADLESS`, a variable that nothing sets, so the server also started under headless hython. A render farm's scene-analysis hython then got an unsolicited server thread and aborted (Fox Renderfarm "Analysis termination", resultCode 3). The guard now uses `hou.isUIAvailable()`.
+
+### Added
+- `REDSHIFT_BESTPRACTICES.md` — all Redshift render findings in one file, linked from the Layer 1 routing table. Corrects the AOV multilayer facts: `RS_outputMultilayerMode` takes the string `"2"` for Full Multi-Layered EXR, and per-AOV output paths use `RS_aovCustomPrefix_<i>`.
+- Best-practice entries: typed `setprimattrib` and int→float AOV primvars, the `rotate()` axis bitmask (pitfall C), `$HIP` empty before a hip save (`sops`), Karma velocity-blur inputs, and ACEScg→sRGB on 8-bit export (`karma`).
+
+### Changed
+- `.gitignore` ignores `tmp/` and `research/` scratch directories.
+
 ## [0.3.0] — 2026-09-19
 
 ### Added
